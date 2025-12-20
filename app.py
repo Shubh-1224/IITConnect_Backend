@@ -17,13 +17,13 @@ import google.generativeai as genai
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
 # PASTE YOUR API KEY HERE
-GOOGLE_API_KEY = "AIzaSyB5QPNOt0s_9iKnawAIa8zzSb4yNr6KQ8k"
+GOOGLE_API_KEY = "PASTE_YOUR_API_KEY_HERE"
 
 if GOOGLE_API_KEY != "PASTE_YOUR_API_KEY_HERE":
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v30.db"
+DB_NAME = "iitconnect_v31.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -286,42 +286,68 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC ---
-def get_ai_model(): return genai.GenerativeModel("gemini-2.5-flash")
+# --- 6. AI LOGIC (WITH FALLBACK) ---
+def get_ai_response(prompt, file_path=None, json_mode=False):
+    """
+    Tries models in sequence to handle 429 Quota Exceeded errors.
+    Fallback order: 2.5-flash -> 2.0-flash -> 1.5-flash
+    """
+    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return None
+    
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            
+            if file_path:
+                # Vision/File based generation
+                try:
+                    uploaded = genai.upload_file(file_path, mime_type='application/pdf')
+                    while uploaded.state.name == "PROCESSING": 
+                        time.sleep(1); uploaded = genai.get_file(uploaded.name)
+                    response = model.generate_content([uploaded, prompt])
+                except:
+                    # Fallback to text only if upload fails
+                    text = get_pdf_text(file_path)
+                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:8000]}")
+            else:
+                # Text based generation
+                response = model.generate_content(prompt)
+            
+            return response.text # Success!
+            
+        except Exception as e:
+            if "429" in str(e): 
+                continue # Rate limit hit, try next model
+            else: 
+                # Genuine error, stop trying
+                return None
+    return None
 
 def clean_json_response(text):
+    if not text: return None
     try: match = re.search(r'\[.*\]', text, re.DOTALL); return json.loads(match.group()) if match else json.loads(text)
     except: return None
 
 def generate_ai_content(file_path, task_type, force_vision=False):
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return None
-    model = get_ai_model(); text = get_pdf_text(file_path)
-    use_vision = force_vision or (len(text.strip()) < 100)
-    
     prompts = {
         'mcq': 'Create 5 MCQs. JSON: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
         'subjective': 'Create 5 short Qs. JSON: [{"question":"...","model_answer":"...","hint":"..."}]',
         'flashcard': 'Create 8 flashcards. JSON: [{"term":"...","definition":"..."}]',
         'summary': "Summarize in bullets. Return text."
     }
-    for _ in range(2):
-        try:
-            if not use_vision: response = model.generate_content(f"{prompts[task_type]}\n\nText:\n{text[:8000]}")
-            else:
-                up = genai.upload_file(file_path, mime_type='application/pdf')
-                while up.state.name == "PROCESSING": time.sleep(1); up = genai.get_file(up.name)
-                response = model.generate_content([up, prompts[task_type]])
-            if task_type == 'summary': return response.text
-            data = clean_json_response(response.text)
-            if data: return data
-        except: time.sleep(1)
-    return None
+    
+    raw_text = get_ai_response(prompts[task_type], file_path)
+    
+    if task_type == 'summary': return raw_text
+    return clean_json_response(raw_text)
 
 def verify_content_with_ai(text, subject):
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return True, "Skipped"
     if not text or len(text.strip()) < 50: return True, "Scanned"
-    try: r = get_ai_model().generate_content(f"Is SPAM? Sub: {subject}. Text: {text[:500]}. Output: VERDICT: [ACCEPT/REJECT]").text; return ("VERDICT: ACCEPT" in r), r 
-    except: return True, "Error"
+    raw_text = get_ai_response(f"Is SPAM? Sub: {subject}. Text: {text[:500]}. Output: VERDICT: [ACCEPT/REJECT]")
+    if raw_text: return ("VERDICT: ACCEPT" in raw_text), raw_text
+    return True, "Error (Allowed)"
 
 # --- 7. UI RENDERERS ---
 def render_comments(target_id, target_type, parent_id=None, level=0):
@@ -337,7 +363,7 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                 if com['user'] == st.session_state.user:
                     c1, c2 = st.columns([0.5, 9.5])
                     with c1:
-                        # KEY REMOVED FROM POPOVER TO FIX TYPEERROR
+                        # NO KEY ARGUMENT IN POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit"):
                                 ed_txt = st.text_input("Edit", value=com['comment'], key=f"ed_com_{com['id']}")
@@ -346,7 +372,7 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                                 st.warning("Delete this comment?")
                                 if st.button("Confirm", key=f"del_c_{com['id']}"): delete_item("comments", com['id'])
                 if level < 3: 
-                    # KEY REMOVED FROM POPOVER
+                    # NO KEY ARGUMENT IN POPOVER
                     with st.popover("Reply"):
                         reply = st.text_input("Reply...", key=f"rp_{com['id']}")
                         if st.button("Post", key=f"bp_{com['id']}"): add_comment(target_id, target_type, st.session_state.user, reply, parent_id=com['id']); st.rerun()
@@ -371,7 +397,6 @@ def render_feed_item(note):
                     if st.button("🔖", key=f"bm_{note['id']}", help="Save"): toggle_bookmark(note['id'])
                 with c_opt:
                     if note['uploader'] == st.session_state.user:
-                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit Post"):
                                 ed_ti = st.text_input("Title", value=note['title'], key=f"edt_{note['id']}")
@@ -381,7 +406,6 @@ def render_feed_item(note):
                                 st.warning(f"Delete this {note['post_type'].title()}?")
                                 if st.button("Confirm", key=f"del_{note['id']}"): delete_item("notes", note['id'])
                     else:
-                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("📤 Share"):
                                 st.write("Copy Link:"); st.code(f"https://iitconnect.app/post/{note['id']}")
@@ -430,7 +454,6 @@ def render_feed_item(note):
                         st.write(f"**{a['responder']}**")
                         st.info(a['answer_text'])
                         if a['responder'] == st.session_state.user:
-                             # KEY REMOVED FROM POPOVER
                              with st.popover("⋮"):
                                  with st.expander("✏️ Edit"):
                                      ed_ans = st.text_area("Edit Answer", value=a['answer_text'], key=f"eda_{a['id']}")
@@ -511,6 +534,7 @@ else:
         if st.button("⚡ Study Center"): st.session_state.nav = "Study Center"
         if st.button("🤖 AI Tutor"): st.session_state.nav = "AI Tutor"
         
+        # ADMIN PANEL (Only for 'admin')
         if st.session_state.user == "admin":
             st.markdown("---")
             if st.button("🔒 Admin Panel"): st.session_state.nav = "Admin"
@@ -518,6 +542,7 @@ else:
         st.divider()
         if st.button("Logout"): st.session_state.user = None; st.rerun()
         
+        # CONTACT US FEATURE
         with st.expander("📞 Contact Us"):
             st.markdown("""
             **Get in Touch:**
@@ -538,11 +563,11 @@ else:
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
             with st.chat_message("assistant"):
-                try:
-                    response = get_ai_model().generate_content(prompt).text
-                    st.markdown(response)
-                    st.session_state.chat_history.append({"role": "assistant", "content": response})
-                except Exception as e: st.error(f"Error: {e}")
+                resp = get_ai_response(prompt)
+                if resp:
+                    st.markdown(resp)
+                    st.session_state.chat_history.append({"role": "assistant", "content": resp})
+                else: st.error("AI is busy. Try again.")
 
     elif menu == "Profile":
         st.title("👤 My Profile")
@@ -625,7 +650,6 @@ else:
         with c2:
             notif_count, notifs = get_unread_notifications(st.session_state.user)
             icon = "🔔" if notif_count == 0 else f"🔔 {notif_count}"
-            # KEY REMOVED FROM POPOVER
             with st.popover(icon):
                 st.write("### Notifications")
                 if notifs:
@@ -797,4 +821,3 @@ else:
                                     with st.container(border=True):
                                         st.markdown(f"### {c['term']}")
                                         with st.expander("Reveal"): st.info(c['definition'])
-                                        #new comment 2
