@@ -25,7 +25,7 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v34.db"
+DB_NAME = "iitconnect_v35.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -288,7 +288,7 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (WITH FALLBACK) ---
+# --- 6. AI LOGIC (WITH FALLBACK & GRADING) ---
 def get_ai_response(prompt, file_path=None, json_mode=False):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": 
         return "Error: API Key missing. Please config."
@@ -333,6 +333,21 @@ def generate_ai_content(file_path, task_type, force_vision=False):
     if task_type == 'summary': return raw_text
     return clean_json_response(raw_text)
 
+def evaluate_subjective_answer(user_ans, model_ans):
+    prompt = f"""
+    Compare the student's answer to the model answer.
+    Student: "{user_ans}"
+    Model: "{model_ans}"
+    
+    Task:
+    1. Score it out of 10.
+    2. Give 1 sentence feedback.
+    
+    Output strictly in JSON: {{"score": int, "feedback": "string"}}
+    """
+    raw = get_ai_response(prompt)
+    return clean_json_response(raw)
+
 def verify_content_with_ai(text, subject):
     if not text or len(text.strip()) < 50: return True, "Scanned"
     raw = get_ai_response(f"Is SPAM? Sub: {subject}. Text: {text[:500]}. Output: VERDICT: [ACCEPT/REJECT]")
@@ -353,6 +368,7 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                 if com['user'] == st.session_state.user:
                     c1, c2 = st.columns([0.5, 9.5])
                     with c1:
+                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit"):
                                 ed_txt = st.text_input("Edit", value=com['comment'], key=f"ed_com_{com['id']}")
@@ -549,8 +565,10 @@ else:
     if menu == "AI Tutor":
         st.title("🤖 AI Tutor Chat")
         st.caption("Ask questions, get explanations, or debug code. (Not saved to database)")
+        
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
+            
         if prompt := st.chat_input("Ask the tutor..."):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
@@ -570,8 +588,10 @@ else:
             c2.metric("Notes", get_user_stats_detailed(st.session_state.user)[2])
             c3.metric("Doubts", get_user_stats_detailed(st.session_state.user)[1])
             c4.metric("Answers", user_data['answers_count'])
+            
             st.write("---")
             t_prof, t_saved = st.tabs(["Edit Profile", "🔖 Saved Items"])
+            
             with t_prof:
                 with st.form("prof_form"):
                     col_l, col_r = st.columns([1, 2])
@@ -596,6 +616,7 @@ else:
                     if st.button("Update Username"):
                         if change_username(st.session_state.user, nu): st.session_state.user=nu; st.success("Changed!"); st.rerun()
                         else: st.error("Taken.")
+                
                 c_del1, c_del2 = st.columns(2)
                 with c_del1:
                     if st.button("Deactivate Account"): deactivate_account(st.session_state.user); st.session_state.user=None; st.rerun()
@@ -605,6 +626,7 @@ else:
                     else:
                         st.error("⚠️ IRREVERSIBLE ACTION!")
                         if st.button("✅ Yes, Delete"): delete_account(st.session_state.user); st.session_state.user=None; st.rerun()
+            
             with t_saved:
                 bookmarks = get_data("SELECT * FROM notes WHERE id IN (SELECT note_id FROM bookmarks WHERE user=?)", (st.session_state.user,))
                 if bookmarks:
@@ -632,6 +654,7 @@ else:
         if reports:
             st.dataframe(reports)
         else: st.success("No reports pending.")
+        
         st.subheader("📚 Course Requests")
         reqs = get_data("SELECT * FROM course_requests ORDER BY timestamp DESC")
         if reqs: st.dataframe(reqs)
@@ -661,6 +684,7 @@ else:
         if cols[0].button("All"): st.session_state.tag_filter = None
         for i, tag in enumerate(top_tags):
             if cols[i+1].button(f"#{tag}"): st.session_state.tag_filter = tag
+            
         q = st.text_input("🔍 Search...", placeholder="Tag, Title...")
         query = "SELECT * FROM notes"
         params = []
@@ -821,8 +845,26 @@ else:
                             with st.spinner("Generating..."): st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
                         if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
                             for i, q in enumerate(st.session_state.study_data):
-                                st.write(f"**Q{i+1}: {q['question']}**"); 
-                                if st.button(f"Show Answer {i+1}"): st.success(q['model_answer'])
+                                st.write(f"**Q{i+1}: {q['question']}**")
+                                
+                                # NEW: TEXT INPUT FOR ANSWER
+                                user_sub_ans = st.text_area(f"Write your answer here:", key=f"sub_input_{i}")
+                                
+                                c_chk, c_show = st.columns(2)
+                                with c_chk:
+                                    if st.button(f"⚡ Check Answer {i+1}", key=f"chk_{i}"):
+                                        if user_sub_ans.strip():
+                                            with st.spinner("AI Grading..."):
+                                                eval_res = evaluate_subjective_answer(user_sub_ans, q['model_answer'])
+                                                if eval_res:
+                                                    st.info(f"**Score: {eval_res['score']}/10**\n\nFeedback: {eval_res['feedback']}")
+                                                else:
+                                                    st.error("AI Busy. Try again.")
+                                        else: st.warning("Please write an answer first.")
+                                
+                                with c_show:
+                                    with st.popover(f"Show Model Answer"):
+                                        st.success(q['model_answer'])
                                 st.divider()
                 elif st.session_state.study_mode_sel == "Tools":
                     t1, t2 = st.tabs(["Summary", "Flashcards"])
