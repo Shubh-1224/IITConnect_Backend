@@ -16,7 +16,7 @@ import google.generativeai as genai
 # --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-# ⚠️ CRITICAL: PASTE YOUR VALID GOOGLE GEMINI API KEY BELOW ⚠️
+# ⚠️ PASTE YOUR VALID GOOGLE GEMINI API KEY BELOW ⚠️
 GOOGLE_API_KEY = "AIzaSyAKwstavaNFcyYZCeoxdpGTz_V5JKSck-c"
 
 if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE":
@@ -25,7 +25,7 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v38.db"
+DB_NAME = "iitconnect_v39.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -288,45 +288,49 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (WITH ROBUST FALLBACK & RETRY) ---
+# --- 6. AI LOGIC (WITH AUTO-DETECTION) ---
+def get_best_model_name():
+    # Helper to find a working model
+    try:
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Preference order
+        preferred = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro', 'gemini-pro']
+        for p in preferred:
+            for m in models:
+                if p in m: return m
+        return models[0] if models else "gemini-pro"
+    except:
+        return "gemini-pro" # Fallback if list_models fails
+
 def get_ai_response(prompt, file_path=None, json_mode=False):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": 
-        return "Error: API Key missing. Check app.py line 20."
+        return "Error: API Key missing. Please config."
     
-    # PRIORITY: Try newer model first, fallback to 'gemini-pro' (stable)
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
-    last_error = ""
+    # DYNAMICALLY FIND BEST MODEL
+    model_name = get_best_model_name()
     
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            if file_path:
-                try:
-                    uploaded = genai.upload_file(file_path, mime_type='application/pdf')
-                    # Wait for processing loop
-                    for _ in range(10):
-                        time.sleep(1)
-                        uploaded = genai.get_file(uploaded.name)
-                        if uploaded.state.name == "ACTIVE": break
-                        if uploaded.state.name == "FAILED": raise Exception("Processing failed")
-                    
-                    response = model.generate_content([uploaded, prompt])
-                except:
-                    # Fallback to pure text extraction if upload fails
-                    text = get_pdf_text(file_path)
-                    if len(text.strip()) < 10: return "Error: Could not read text from PDF."
-                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:10000]}")
-            else:
-                response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            last_error = str(e)
-            if "404" in last_error or "not found" in last_error:
-                continue # Try next model if current is not found (library mismatch)
-            if "429" in last_error:
-                time.sleep(2); continue # Rate limit, wait and retry
-            
-    return f"AI Error: {last_error} (Try: pip install --upgrade google-generativeai)"
+    try:
+        model = genai.GenerativeModel(model_name)
+        if file_path:
+            try:
+                uploaded = genai.upload_file(file_path, mime_type='application/pdf')
+                # Wait for processing loop
+                for _ in range(10):
+                    time.sleep(1)
+                    uploaded = genai.get_file(uploaded.name)
+                    if uploaded.state.name == "ACTIVE": break
+                    if uploaded.state.name == "FAILED": raise Exception("Processing failed")
+                
+                response = model.generate_content([uploaded, prompt])
+            except:
+                text = get_pdf_text(file_path)
+                if len(text.strip()) < 10: return "Error: Could not read text from PDF."
+                response = model.generate_content(f"{prompt}\n\nContext:\n{text[:10000]}")
+        else:
+            response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"AI Error: {str(e)} (Model attempted: {model_name})"
 
 def clean_json_response(text):
     if not text or text.startswith("Error") or text.startswith("AI"): return None
@@ -567,11 +571,14 @@ else:
     if menu == "AI Tutor":
         st.title("🤖 AI Tutor Chat")
         st.caption("Ask questions, get explanations, or debug code. (Not saved to database)")
+        
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
+            
         if prompt := st.chat_input("Ask the tutor..."):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
+            
             with st.chat_message("assistant"):
                 resp = get_ai_response(prompt)
                 if resp.startswith("Error") or resp.startswith("AI Error"):
@@ -694,27 +701,22 @@ else:
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        # FORCE SQUARE CARDS CSS WITH INCREASED SPECIFICITY
+        # FORCE SQUARE CARDS CSS
         st.markdown("""
         <style>
-        div[data-testid="column"] .stButton button {
+        div[data-testid="column"] button {
             height: 180px !important;
             width: 100% !important;
-            min-height: 180px !important;
             aspect-ratio: 1/1 !important;
             padding: 20px !important;
             white-space: normal !important;
-            background: linear-gradient(145deg, #1e1e1e, #2b2b2b) !important;
+            background-color: #1e1e1e !important;
             border: 1px solid #444 !important;
             border-radius: 15px !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
-        }
-        div[data-testid="column"] .stButton button p {
-            font-size: 20px !important;
-            font-weight: 600 !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -788,7 +790,7 @@ else:
 
         if st.session_state.study_mode_sel is None:
             # FORCE SQUARE CARDS CSS
-            st.markdown("""<style>div[data-testid="column"] .stButton button {height: 180px !important; width: 100% !important; min-height: 180px !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background: linear-gradient(145deg, #1e1e1e, #2b2b2b) !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
+            st.markdown("""<style>div[data-testid="column"] button {height: 180px !important; width: 100% !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background-color: #1e1e1e !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
@@ -821,7 +823,7 @@ else:
                                 st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
                                 st.session_state.quiz_answers = {}
                         
-                        # Check if error message returned
+                        # NEW: Check if error message returned
                         if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
                             st.error(st.session_state.study_data)
                         elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
@@ -834,7 +836,7 @@ else:
                             if st.button("📝 Submit Quiz"):
                                 score = 0
                                 for i, q in enumerate(st.session_state.study_data):
-                                    # Fetch answer from state
+                                    # READ DIRECTLY FROM STATE KEY
                                     u_ans = st.session_state.get(f"mq_{i}")
                                     is_correct = False
                                     
@@ -861,6 +863,7 @@ else:
                         if st.button("Generate Subjective"):
                             with st.spinner("Generating..."): st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
                         
+                        # NEW: Check if error message returned
                         if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
                             st.error(st.session_state.study_data)
                         elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
