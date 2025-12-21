@@ -25,7 +25,7 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v36.db"
+DB_NAME = "iitconnect_v37.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -288,12 +288,13 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (WITH FALLBACK & GRADING) ---
+# --- 6. AI LOGIC (WITH ROBUST FALLBACK) ---
 def get_ai_response(prompt, file_path=None, json_mode=False):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": 
         return "Error: API Key missing. Please config."
     
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # Updated Model List: Flash -> Pro -> Pro (1.0)
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro"]
     last_error = ""
     
     for model_name in models_to_try:
@@ -302,7 +303,11 @@ def get_ai_response(prompt, file_path=None, json_mode=False):
             if file_path:
                 try:
                     uploaded = genai.upload_file(file_path, mime_type='application/pdf')
-                    while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
+                    # Wait for processing
+                    for _ in range(5):
+                        time.sleep(2)
+                        uploaded = genai.get_file(uploaded.name)
+                        if uploaded.state.name == "ACTIVE": break
                     response = model.generate_content([uploaded, prompt])
                 except:
                     text = get_pdf_text(file_path)
@@ -312,10 +317,9 @@ def get_ai_response(prompt, file_path=None, json_mode=False):
             return response.text
         except Exception as e:
             last_error = str(e)
-            if "429" in last_error: continue
-            else: return f"AI Error: {last_error}"
+            continue # Try next model
             
-    return f"AI Busy/Quota Exceeded. Last Error: {last_error}"
+    return f"AI Error (All models failed). Last: {last_error}"
 
 def clean_json_response(text):
     if not text or text.startswith("Error") or text.startswith("AI"): return None
@@ -330,11 +334,6 @@ def generate_ai_content(file_path, task_type, force_vision=False):
         'summary': "Summarize in bullets. Return text."
     }
     raw_text = get_ai_response(prompts[task_type], file_path)
-    
-    # NEW: If error, return error string
-    if raw_text and (raw_text.startswith("Error") or raw_text.startswith("AI")):
-        return raw_text
-        
     if task_type == 'summary': return raw_text
     return clean_json_response(raw_text)
 
@@ -374,7 +373,6 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                 if com['user'] == st.session_state.user:
                     c1, c2 = st.columns([0.5, 9.5])
                     with c1:
-                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit"):
                                 ed_txt = st.text_input("Edit", value=com['comment'], key=f"ed_com_{com['id']}")
@@ -826,17 +824,30 @@ else:
                         elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
                             for i, q in enumerate(st.session_state.study_data):
                                 st.markdown(f"**Q{i+1}: {q['question']}**")
-                                st.session_state.quiz_answers[i] = st.radio("Select:", q['options'], key=f"mq_{i}", index=None)
+                                # DIRECT STATE READ to prevent reset
+                                current_val = st.session_state.get(f"mq_{i}", None)
+                                st.radio("Select:", q['options'], key=f"mq_{i}", index=None if not current_val else None)
                                 st.divider()
+                            
                             if st.button("📝 Submit Quiz"):
                                 score = 0
                                 for i, q in enumerate(st.session_state.study_data):
-                                    u_ans = st.session_state.quiz_answers.get(i)
+                                    # READ DIRECTLY FROM STATE KEY
+                                    u_ans = st.session_state.get(f"mq_{i}")
                                     is_correct = False
+                                    
+                                    # ROBUST CLEANING FOR COMPARISON
                                     if u_ans:
-                                        u_clean = u_ans.strip().lower()
-                                        a_clean = q['answer'].strip().lower()
-                                        if u_clean == a_clean or a_clean in u_clean or u_clean in a_clean: is_correct = True
+                                        # Remove "A. ", "B. ", punctuation, and lowercase
+                                        clean_u = re.sub(r'^[A-D]\.\s*', '', u_ans).strip().lower()
+                                        clean_u = re.sub(r'[^\w\s]', '', clean_u) # Remove special chars
+                                        
+                                        clean_a = re.sub(r'^[A-D]\.\s*', '', q['answer']).strip().lower()
+                                        clean_a = re.sub(r'[^\w\s]', '', clean_a)
+
+                                        # Fuzzy match
+                                        if clean_u == clean_a or clean_a in clean_u or clean_u in clean_a:
+                                            is_correct = True
                                     
                                     if is_correct: score += 1
                                     else: st.error(f"Q{i+1}: Incorrect. Answer: {q['answer']}")
