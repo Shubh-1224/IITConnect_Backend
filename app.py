@@ -25,7 +25,7 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v37.db"
+DB_NAME = "iitconnect_v38.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -288,13 +288,13 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (WITH ROBUST FALLBACK) ---
+# --- 6. AI LOGIC (WITH ROBUST FALLBACK & RETRY) ---
 def get_ai_response(prompt, file_path=None, json_mode=False):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": 
-        return "Error: API Key missing. Please config."
+        return "Error: API Key missing. Check app.py line 20."
     
-    # Updated Model List: Flash -> Pro -> Pro (1.0)
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro"]
+    # PRIORITY: Try newer model first, fallback to 'gemini-pro' (stable)
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
     last_error = ""
     
     for model_name in models_to_try:
@@ -303,23 +303,30 @@ def get_ai_response(prompt, file_path=None, json_mode=False):
             if file_path:
                 try:
                     uploaded = genai.upload_file(file_path, mime_type='application/pdf')
-                    # Wait for processing
-                    for _ in range(5):
-                        time.sleep(2)
+                    # Wait for processing loop
+                    for _ in range(10):
+                        time.sleep(1)
                         uploaded = genai.get_file(uploaded.name)
                         if uploaded.state.name == "ACTIVE": break
+                        if uploaded.state.name == "FAILED": raise Exception("Processing failed")
+                    
                     response = model.generate_content([uploaded, prompt])
                 except:
+                    # Fallback to pure text extraction if upload fails
                     text = get_pdf_text(file_path)
-                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:8000]}")
+                    if len(text.strip()) < 10: return "Error: Could not read text from PDF."
+                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:10000]}")
             else:
                 response = model.generate_content(prompt)
             return response.text
         except Exception as e:
             last_error = str(e)
-            continue # Try next model
+            if "404" in last_error or "not found" in last_error:
+                continue # Try next model if current is not found (library mismatch)
+            if "429" in last_error:
+                time.sleep(2); continue # Rate limit, wait and retry
             
-    return f"AI Error (All models failed). Last: {last_error}"
+    return f"AI Error: {last_error} (Try: pip install --upgrade google-generativeai)"
 
 def clean_json_response(text):
     if not text or text.startswith("Error") or text.startswith("AI"): return None
@@ -328,7 +335,7 @@ def clean_json_response(text):
 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
-        'mcq': 'Create 5 MCQs. JSON: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
+        'mcq': 'Create 5 MCQs. JSON: [{"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"answer":"Exact Text of Correct Option","hint":"..."}]',
         'subjective': 'Create 5 short Qs. JSON: [{"question":"...","model_answer":"...","hint":"..."}]',
         'flashcard': 'Create 8 flashcards. JSON: [{"term":"...","definition":"..."}]',
         'summary': "Summarize in bullets. Return text."
@@ -338,17 +345,8 @@ def generate_ai_content(file_path, task_type, force_vision=False):
     return clean_json_response(raw_text)
 
 def evaluate_subjective_answer(user_ans, model_ans):
-    prompt = f"""
-    Compare the student's answer to the model answer.
-    Student: "{user_ans}"
-    Model: "{model_ans}"
-    
-    Task:
-    1. Score it out of 10.
-    2. Give 1 sentence feedback.
-    
-    Output strictly in JSON: {{"score": int, "feedback": "string"}}
-    """
+    prompt = f"""Compare: Student: "{user_ans}" vs Model: "{model_ans}".
+    Output strictly JSON: {{"score": int_out_of_10, "feedback": "string"}}"""
     raw = get_ai_response(prompt)
     if raw and (raw.startswith("Error") or raw.startswith("AI")): return None
     return clean_json_response(raw)
@@ -576,7 +574,7 @@ else:
             with st.chat_message("user"): st.markdown(prompt)
             with st.chat_message("assistant"):
                 resp = get_ai_response(prompt)
-                if resp.startswith("Error"):
+                if resp.startswith("Error") or resp.startswith("AI Error"):
                     st.error(resp) # Show actual error from AI function
                 else:
                     st.markdown(resp)
@@ -696,22 +694,27 @@ else:
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        # FORCE SQUARE CARDS CSS
+        # FORCE SQUARE CARDS CSS WITH INCREASED SPECIFICITY
         st.markdown("""
         <style>
-        div[data-testid="column"] button {
+        div[data-testid="column"] .stButton button {
             height: 180px !important;
             width: 100% !important;
+            min-height: 180px !important;
             aspect-ratio: 1/1 !important;
             padding: 20px !important;
             white-space: normal !important;
-            background-color: #1e1e1e !important;
+            background: linear-gradient(145deg, #1e1e1e, #2b2b2b) !important;
             border: 1px solid #444 !important;
             border-radius: 15px !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
+        }
+        div[data-testid="column"] .stButton button p {
+            font-size: 20px !important;
+            font-weight: 600 !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -785,7 +788,7 @@ else:
 
         if st.session_state.study_mode_sel is None:
             # FORCE SQUARE CARDS CSS
-            st.markdown("""<style>div[data-testid="column"] button {height: 180px !important; width: 100% !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background-color: #1e1e1e !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
+            st.markdown("""<style>div[data-testid="column"] .stButton button {height: 180px !important; width: 100% !important; min-height: 180px !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background: linear-gradient(145deg, #1e1e1e, #2b2b2b) !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
@@ -818,36 +821,38 @@ else:
                                 st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
                                 st.session_state.quiz_answers = {}
                         
-                        # NEW: Check if error message returned
+                        # Check if error message returned
                         if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
                             st.error(st.session_state.study_data)
                         elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
                             for i, q in enumerate(st.session_state.study_data):
                                 st.markdown(f"**Q{i+1}: {q['question']}**")
-                                # DIRECT STATE READ to prevent reset
-                                current_val = st.session_state.get(f"mq_{i}", None)
-                                st.radio("Select:", q['options'], key=f"mq_{i}", index=None if not current_val else None)
+                                # Read state directly to persist selection
+                                st.radio("Select:", q['options'], key=f"mq_{i}", index=None)
                                 st.divider()
                             
                             if st.button("📝 Submit Quiz"):
                                 score = 0
                                 for i, q in enumerate(st.session_state.study_data):
-                                    # READ DIRECTLY FROM STATE KEY
+                                    # Fetch answer from state
                                     u_ans = st.session_state.get(f"mq_{i}")
                                     is_correct = False
                                     
-                                    # ROBUST CLEANING FOR COMPARISON
                                     if u_ans:
-                                        # Remove "A. ", "B. ", punctuation, and lowercase
-                                        clean_u = re.sub(r'^[A-D]\.\s*', '', u_ans).strip().lower()
-                                        clean_u = re.sub(r'[^\w\s]', '', clean_u) # Remove special chars
+                                        # SUPER FUZZY MATCHING LOGIC
+                                        # Remove "A.", "B.", punctuation, and lowercase
+                                        u_clean = re.sub(r'^[A-D]\.?\s*', '', u_ans).strip().lower()
+                                        u_clean = re.sub(r'[^\w\s]', '', u_clean) # Remove special chars
                                         
-                                        clean_a = re.sub(r'^[A-D]\.\s*', '', q['answer']).strip().lower()
-                                        clean_a = re.sub(r'[^\w\s]', '', clean_a)
+                                        a_clean = re.sub(r'^[A-D]\.?\s*', '', q['answer']).strip().lower()
+                                        a_clean = re.sub(r'[^\w\s]', '', a_clean)
 
-                                        # Fuzzy match
-                                        if clean_u == clean_a or clean_a in clean_u or clean_u in clean_a:
+                                        # Check if overlapping content exists
+                                        if u_clean and a_clean and (u_clean in a_clean or a_clean in u_clean):
                                             is_correct = True
+                                        
+                                        # Debug fallback: Exact match on raw string just in case
+                                        if u_ans == q['answer']: is_correct = True
                                     
                                     if is_correct: score += 1
                                     else: st.error(f"Q{i+1}: Incorrect. Answer: {q['answer']}")
@@ -856,7 +861,6 @@ else:
                         if st.button("Generate Subjective"):
                             with st.spinner("Generating..."): st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
                         
-                        # NEW: Check if error message returned
                         if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
                             st.error(st.session_state.study_data)
                         elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
