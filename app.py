@@ -822,4 +822,4 @@ else:
                                         st.markdown(f"### {c['term']}")
                                         with st.expander("Reveal"): st.info(c['definition'])
                                         # lodu lalit
-                                        
+                                        # dhimant
