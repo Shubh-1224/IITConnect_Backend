@@ -25,7 +25,7 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v33.db"
+DB_NAME = "iitconnect_v34.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -806,7 +806,14 @@ else:
                                 score = 0
                                 for i, q in enumerate(st.session_state.study_data):
                                     u_ans = st.session_state.quiz_answers.get(i)
-                                    if u_ans and u_ans.strip() == q['answer'].strip(): score += 1
+                                    # SMART CHECK: Check if Answer TEXT is inside user selection
+                                    is_correct = False
+                                    if u_ans:
+                                        u_clean = u_ans.strip().lower()
+                                        a_clean = q['answer'].strip().lower()
+                                        if u_clean == a_clean or a_clean in u_clean or u_clean in a_clean: is_correct = True
+                                    
+                                    if is_correct: score += 1
                                     else: st.error(f"Q{i+1}: Incorrect. Answer: {q['answer']}")
                                 st.balloons(); st.success(f"Final Score: {score} / {len(st.session_state.study_data)}")
                     with t2:
