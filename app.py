@@ -16,14 +16,16 @@ import google.generativeai as genai
 # --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-# PASTE YOUR API KEY HERE
+# ⚠️ CRITICAL: PASTE YOUR VALID GOOGLE GEMINI API KEY BELOW ⚠️
 GOOGLE_API_KEY = "PASTE_YOUR_API_KEY_HERE"
 
-if GOOGLE_API_KEY != "PASTE_YOUR_API_KEY_HERE":
+if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE":
+    st.error("⚠️ API KEY MISSING: You must replace 'PASTE_YOUR_API_KEY_HERE' in line 19 of app.py with your actual Gemini API Key.")
+else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v31.db"
+DB_NAME = "iitconnect_v31_1.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -286,47 +288,36 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (WITH FALLBACK) ---
+# --- 6. AI LOGIC (WITH ERROR REPORTING) ---
 def get_ai_response(prompt, file_path=None, json_mode=False):
-    """
-    Tries models in sequence to handle 429 Quota Exceeded errors.
-    Fallback order: 2.5-flash -> 2.0-flash -> 1.5-flash
-    """
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return None
+    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Check app.py line 19."
     
     models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    last_error = ""
     
     for model_name in models_to_try:
         try:
             model = genai.GenerativeModel(model_name)
-            
             if file_path:
-                # Vision/File based generation
                 try:
                     uploaded = genai.upload_file(file_path, mime_type='application/pdf')
-                    while uploaded.state.name == "PROCESSING": 
-                        time.sleep(1); uploaded = genai.get_file(uploaded.name)
+                    while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
                     response = model.generate_content([uploaded, prompt])
                 except:
-                    # Fallback to text only if upload fails
                     text = get_pdf_text(file_path)
                     response = model.generate_content(f"{prompt}\n\nContext:\n{text[:8000]}")
             else:
-                # Text based generation
                 response = model.generate_content(prompt)
-            
-            return response.text # Success!
-            
+            return response.text
         except Exception as e:
-            if "429" in str(e): 
-                continue # Rate limit hit, try next model
-            else: 
-                # Genuine error, stop trying
-                return None
-    return None
+            last_error = str(e)
+            if "429" in last_error: continue
+            else: return f"AI Error: {last_error}"
+            
+    return f"AI Error: Quota Exceeded on all models. Last: {last_error}"
 
 def clean_json_response(text):
-    if not text: return None
+    if not text or text.startswith("Error") or text.startswith("AI"): return None
     try: match = re.search(r'\[.*\]', text, re.DOTALL); return json.loads(match.group()) if match else json.loads(text)
     except: return None
 
@@ -337,16 +328,14 @@ def generate_ai_content(file_path, task_type, force_vision=False):
         'flashcard': 'Create 8 flashcards. JSON: [{"term":"...","definition":"..."}]',
         'summary': "Summarize in bullets. Return text."
     }
-    
     raw_text = get_ai_response(prompts[task_type], file_path)
-    
     if task_type == 'summary': return raw_text
     return clean_json_response(raw_text)
 
 def verify_content_with_ai(text, subject):
     if not text or len(text.strip()) < 50: return True, "Scanned"
-    raw_text = get_ai_response(f"Is SPAM? Sub: {subject}. Text: {text[:500]}. Output: VERDICT: [ACCEPT/REJECT]")
-    if raw_text: return ("VERDICT: ACCEPT" in raw_text), raw_text
+    raw = get_ai_response(f"Is SPAM? Sub: {subject}. Text: {text[:500]}. Output: VERDICT: [ACCEPT/REJECT]")
+    if raw and "Error" not in raw: return ("VERDICT: ACCEPT" in raw), raw
     return True, "Error (Allowed)"
 
 # --- 7. UI RENDERERS ---
@@ -363,7 +352,7 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                 if com['user'] == st.session_state.user:
                     c1, c2 = st.columns([0.5, 9.5])
                     with c1:
-                        # NO KEY ARGUMENT IN POPOVER
+                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit"):
                                 ed_txt = st.text_input("Edit", value=com['comment'], key=f"ed_com_{com['id']}")
@@ -372,7 +361,6 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                                 st.warning("Delete this comment?")
                                 if st.button("Confirm", key=f"del_c_{com['id']}"): delete_item("comments", com['id'])
                 if level < 3: 
-                    # NO KEY ARGUMENT IN POPOVER
                     with st.popover("Reply"):
                         reply = st.text_input("Reply...", key=f"rp_{com['id']}")
                         if st.button("Post", key=f"bp_{com['id']}"): add_comment(target_id, target_type, st.session_state.user, reply, parent_id=com['id']); st.rerun()
@@ -564,10 +552,11 @@ else:
             with st.chat_message("user"): st.markdown(prompt)
             with st.chat_message("assistant"):
                 resp = get_ai_response(prompt)
-                if resp:
+                if resp.startswith("Error"):
+                    st.error(resp) # Show actual error
+                else:
                     st.markdown(resp)
                     st.session_state.chat_history.append({"role": "assistant", "content": resp})
-                else: st.error("AI is busy. Try again.")
 
     elif menu == "Profile":
         st.title("👤 My Profile")
@@ -683,7 +672,29 @@ else:
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        st.markdown("""<style>div[data-testid="column"] div.stButton > button {height: 200px !important; width: 100% !important; aspect-ratio: 1/1 !important; border-radius: 20px !important; font-size: 22px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: linear-gradient(145deg, #1e1e1e, #292929) !important; border: 1px solid #444 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;}</style>""", unsafe_allow_html=True)
+        # PAGE SPECIFIC SQUARE CSS INJECTION (FORCE HEIGHT)
+        st.markdown("""
+        <style>
+        div[data-testid="column"] div.stButton > button {
+            height: 12rem !important;
+            width: 100% !important;
+            aspect-ratio: 1/1 !important;
+            border-radius: 20px !important;
+            font-size: 1.5rem !important;
+            white-space: normal !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            background: linear-gradient(145deg, #1e1e1e, #292929) !important;
+            border: 1px solid #444 !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        }
+        div[data-testid="column"] div.stButton > button p {
+            font-size: 1.5rem !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         
         with st.expander("➕ Request a New Course"):
             with st.form("req_course_form"):
@@ -753,7 +764,8 @@ else:
         if 'study_mode_sel' not in st.session_state: st.session_state.study_mode_sel = None
 
         if st.session_state.study_mode_sel is None:
-            st.markdown("""<style>div[data-testid="column"] div.stButton > button {height: 200px !important; width: 100% !important; aspect-ratio: 1/1 !important; border-radius: 20px !important; font-size: 22px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: linear-gradient(145deg, #1e1e1e, #292929) !important; border: 1px solid #444 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;}</style>""", unsafe_allow_html=True)
+            # FORCE SQUARE CARDS
+            st.markdown("""<style>div[data-testid="column"] div.stButton > button {height: 12rem !important; width: 100% !important; aspect-ratio: 1/1 !important; border-radius: 20px !important; font-size: 1.5rem !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: linear-gradient(145deg, #1e1e1e, #292929) !important; border: 1px solid #444 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;}</style>""", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
@@ -821,5 +833,3 @@ else:
                                     with st.container(border=True):
                                         st.markdown(f"### {c['term']}")
                                         with st.expander("Reveal"): st.info(c['definition'])
-                                        # lodu lalit
-                                        # dhimant
