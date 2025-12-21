@@ -16,19 +16,16 @@ import google.generativeai as genai
 # --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-# ==========================================
-# 🔑 ACTION REQUIRED: PASTE YOUR API KEY BELOW
-# ==========================================
-GOOGLE_API_KEY = "PASTE_YOUR_API_KEY_HERE" 
+# ⚠️ CRITICAL: PASTE YOUR VALID GOOGLE GEMINI API KEY BELOW ⚠️
+GOOGLE_API_KEY = "AIzaSyAKwstavaNFcyYZCeoxdpGTz_V5JKSck-c"
 
 if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE":
-    # This warning helps you know if the key is missing
-    st.error("⚠️ API KEY MISSING: Please generate a free key at https://aistudio.google.com/app/apikey and paste it in line 20 of app.py")
+    st.error("⚠️ API KEY MISSING: You must replace 'PASTE_YOUR_API_KEY_HERE' in line 20 of app.py with your actual Gemini API Key.")
 else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
-DB_NAME = "iitconnect_v32.db"
+DB_NAME = "iitconnect_v33.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -479,6 +476,10 @@ if 'view_user' not in st.session_state: st.session_state.view_user = None
 if 'course_tab' not in st.session_state: st.session_state.course_tab = "Notes"
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 
+# --- FIX: INITIALIZE MISSING VARIABLES ---
+if 'study_data' not in st.session_state: st.session_state.study_data = None
+if 'quiz_answers' not in st.session_state: st.session_state.quiz_answers = {}
+
 if not st.session_state.user:
     st.title("IITConnect")
     t1, t2 = st.tabs(["Login", "Register"])
@@ -548,18 +549,15 @@ else:
     if menu == "AI Tutor":
         st.title("🤖 AI Tutor Chat")
         st.caption("Ask questions, get explanations, or debug code. (Not saved to database)")
-        
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
-            
         if prompt := st.chat_input("Ask the tutor..."):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
-            
             with st.chat_message("assistant"):
                 resp = get_ai_response(prompt)
                 if resp.startswith("Error"):
-                    st.error(resp) # Show exact error from AI function
+                    st.error(resp) # Show actual error from AI function
                 else:
                     st.markdown(resp)
                     st.session_state.chat_history.append({"role": "assistant", "content": resp})
@@ -572,10 +570,8 @@ else:
             c2.metric("Notes", get_user_stats_detailed(st.session_state.user)[2])
             c3.metric("Doubts", get_user_stats_detailed(st.session_state.user)[1])
             c4.metric("Answers", user_data['answers_count'])
-            
             st.write("---")
             t_prof, t_saved = st.tabs(["Edit Profile", "🔖 Saved Items"])
-            
             with t_prof:
                 with st.form("prof_form"):
                     col_l, col_r = st.columns([1, 2])
@@ -600,7 +596,6 @@ else:
                     if st.button("Update Username"):
                         if change_username(st.session_state.user, nu): st.session_state.user=nu; st.success("Changed!"); st.rerun()
                         else: st.error("Taken.")
-                
                 c_del1, c_del2 = st.columns(2)
                 with c_del1:
                     if st.button("Deactivate Account"): deactivate_account(st.session_state.user); st.session_state.user=None; st.rerun()
@@ -610,7 +605,6 @@ else:
                     else:
                         st.error("⚠️ IRREVERSIBLE ACTION!")
                         if st.button("✅ Yes, Delete"): delete_account(st.session_state.user); st.session_state.user=None; st.rerun()
-            
             with t_saved:
                 bookmarks = get_data("SELECT * FROM notes WHERE id IN (SELECT note_id FROM bookmarks WHERE user=?)", (st.session_state.user,))
                 if bookmarks:
@@ -638,7 +632,6 @@ else:
         if reports:
             st.dataframe(reports)
         else: st.success("No reports pending.")
-        
         st.subheader("📚 Course Requests")
         reqs = get_data("SELECT * FROM course_requests ORDER BY timestamp DESC")
         if reqs: st.dataframe(reqs)
@@ -663,13 +656,11 @@ else:
         all_tags = []
         for t in tags_raw: all_tags.extend([x.strip() for x in t['tags'].split(',') if x.strip()])
         top_tags = [t[0] for t in Counter(all_tags).most_common(5)]
-        
         st.write("Trending Topics:")
         cols = st.columns(len(top_tags) + 1)
         if cols[0].button("All"): st.session_state.tag_filter = None
         for i, tag in enumerate(top_tags):
             if cols[i+1].button(f"#{tag}"): st.session_state.tag_filter = tag
-            
         q = st.text_input("🔍 Search...", placeholder="Tag, Title...")
         query = "SELECT * FROM notes"
         params = []
@@ -685,30 +676,22 @@ else:
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        
-        # --- IMPROVED SQUARE CARD CSS ---
+        # FORCE SQUARE CARDS CSS
         st.markdown("""
         <style>
-        /* Force buttons in the folders column to be square cards */
-        div[data-testid="column"] .stButton button {
-            min-height: 180px !important;
-            height: auto !important;
+        div[data-testid="column"] button {
+            height: 180px !important;
             width: 100% !important;
-            padding-top: 30px !important;
-            padding-bottom: 30px !important;
+            aspect-ratio: 1/1 !important;
+            padding: 20px !important;
             white-space: normal !important;
+            background-color: #1e1e1e !important;
+            border: 1px solid #444 !important;
+            border-radius: 15px !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
-            background: linear-gradient(145deg, #1e1e1e, #292929) !important;
-            border: 1px solid #444 !important;
-            border-radius: 20px !important;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
-        }
-        div[data-testid="column"] .stButton button p {
-            font-size: 22px !important;
-            font-weight: 600 !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -781,31 +764,8 @@ else:
         if 'study_mode_sel' not in st.session_state: st.session_state.study_mode_sel = None
 
         if st.session_state.study_mode_sel is None:
-            # SQUARE CARDS CSS INJECTION
-            st.markdown("""
-            <style>
-            div[data-testid="column"] .stButton button {
-                min-height: 180px !important;
-                height: auto !important;
-                width: 100% !important;
-                padding-top: 30px !important;
-                padding-bottom: 30px !important;
-                white-space: normal !important;
-                display: flex !important;
-                flex-direction: column !important;
-                align-items: center !important;
-                justify-content: center !important;
-                background: linear-gradient(145deg, #1e1e1e, #292929) !important;
-                border: 1px solid #444 !important;
-                border-radius: 20px !important;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
-            }
-            div[data-testid="column"] .stButton button p {
-                font-size: 20px !important;
-                font-weight: 600 !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
+            # FORCE SQUARE CARDS CSS
+            st.markdown("""<style>div[data-testid="column"] button {height: 180px !important; width: 100% !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background-color: #1e1e1e !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
