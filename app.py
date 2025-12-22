@@ -5,241 +5,121 @@ import hashlib
 import json
 import time
 import re
+import pandas as pd
 import base64
 from collections import Counter
 from datetime import datetime
 from pypdf import PdfReader
 from streamlit_pdf_viewer import pdf_viewer
 import google.generativeai as genai
-import pandas as pd
+import graphviz
 
-# ==========================================
-# 1. SETUP & CONFIGURATION
-# ==========================================
+# --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-# ⚠️ CRITICAL: PASTE YOUR VALID GOOGLE GEMINI API KEY BELOW ⚠️
-GOOGLE_API_KEY = "AIzaSyAKwstavaNFcyYZCeoxdpGTz_V5JKSck-c"
+# ⚠️ PASTE YOUR VALID GOOGLE GEMINI API KEY HERE ⚠️
+GOOGLE_API_KEY = "AIzaSyAiB8tRLVx6KoWvbHW9hpe_uJzJVSEWhMs"
 
-# Configure AI
 if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE":
-    st.error("⚠️ API KEY MISSING: You must replace 'PASTE_YOUR_API_KEY_HERE' in line 23 of app.py with your actual Gemini API Key.")
+    st.warning("⚠️ Please replace 'PASTE_YOUR_API_KEY_HERE' in the code with your actual Gemini API Key.")
 else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# Constants
-DB_NAME = "iitconnect_v43.db"
+# CONSTANTS
+DB_NAME = "iitconnect_v44.db"
 UPLOAD_FOLDER = "uploaded_notes"
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
-# ==========================================
-# 2. SESSION STATE INITIALIZATION
-# ==========================================
-# This block prevents the "AttributeError" crashes by ensuring variables exist.
-if 'user' not in st.session_state:
-    st.session_state.user = None
-if 'nav' not in st.session_state:
-    st.session_state.nav = "Feed"
-if 'study_mode_sel' not in st.session_state:
-    st.session_state.study_mode_sel = None
-if 'study_data' not in st.session_state:
-    st.session_state.study_data = None
-if 'quiz_answers' not in st.session_state:
-    st.session_state.quiz_answers = {}
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'view_user' not in st.session_state:
-    st.session_state.view_user = None
-if 'folder' not in st.session_state:
-    st.session_state.folder = None
-if 'course_tab' not in st.session_state:
-    st.session_state.course_tab = "Notes"
-if 'confirm_delete' not in st.session_state:
-    st.session_state.confirm_delete = False
-if 'tag_filter' not in st.session_state:
-    st.session_state.tag_filter = None
-
-# ==========================================
-# 3. MODERN CSS STYLING
-# ==========================================
+# --- 2. MODERN CSS STYLING ---
 st.markdown("""
 <style>
-    /* IMPORT MODERN FONT */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-
-    /* 1. GENERAL BUTTON STYLING */
+    /* GENERAL BUTTON STYLING */
     div.stButton > button {
-        width: 100%;
-        border-radius: 12px;
-        height: 3.2em;
-        background-color: #2b2d42; /* Deep Blue-Grey */
-        color: white;
-        border: 1px solid #3d405b;
-        font-weight: 500;
-        transition: all 0.3s ease;
+        width: 100%; border-radius: 12px; height: 3.2em;
+        background-color: #2b2d42; color: white; border: 1px solid #3d405b;
+        font-weight: 500; transition: all 0.3s ease;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     div.stButton > button:hover {
-        border-color: #ff5722;
-        background-color: #3d405b;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        border-color: #ff5722; background-color: #3d405b;
+        transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
 
-    /* 2. SIDEBAR STYLING */
-    section[data-testid="stSidebar"] {
-        background-color: #1a1a1a;
-    }
+    /* SIDEBAR STYLING */
+    section[data-testid="stSidebar"] { background-color: #1a1a1a; }
     section[data-testid="stSidebar"] div.stButton > button {
-        text-align: left;
-        padding-left: 20px;
-        border: none;
-        background-color: transparent;
-        height: 3.5em;
+        text-align: left; padding-left: 20px; border: none; background-color: transparent;
     }
     section[data-testid="stSidebar"] div.stButton > button:hover {
-        background-color: #333;
-        color: #ff5722; /* Orange accent on hover */
+        background-color: #333; color: #ff5722;
     }
 
-    /* 3. PROFILE BUTTON (Google Style) */
+    /* PROFILE USERNAME BUTTON */
     div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button {
-        border-radius: 50% !important;
-        height: 80px !important;
-        width: 80px !important;
-        margin: 0 auto !important;
-        display: block !important;
-        background: linear-gradient(135deg, #ff5722, #ff8a65) !important;
-        color: white !important;
-        font-size: 32px !important;
-        font-weight: 800 !important;
-        border: 3px solid #1a1a1a !important;
-        box-shadow: 0 4px 15px rgba(255, 87, 34, 0.4) !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-    }
-
-    /* 4. FEED CARDS (Container Styling) */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
-        gap: 1rem;
-    }
-    
-    /* 5. CUSTOM TAG PILLS */
-    .tag-pill {
-        display: inline-block;
-        padding: 6px 12px;
-        margin: 4px;
-        background-color: #333;
-        border-radius: 20px;
-        font-size: 13px;
-        color: #e0e0e0;
-        border: 1px solid #444;
-    }
-
-    /* 6. LEADERBOARD */
-    thead tr th {
-        background-color: #1e1e1e !important;
+        background: transparent !important;
+        border: 2px solid #ff5722 !important;
         color: #ff5722 !important;
-        font-size: 16px !important;
-        border-bottom: 2px solid #333 !important;
+        font-size: 22px !important;
+        font-weight: 800 !important;
+        text-align: center !important;
+        height: 3.5em !important;
+        border-radius: 15px !important;
+        margin-bottom: 20px !important;
+        box-shadow: none !important;
     }
-    
-    /* 7. HEADERS */
-    h1, h2, h3 {
-        color: #f0f0f0;
-        font-weight: 700;
-        letter-spacing: -0.5px;
+    div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button:hover {
+        background-color: #ff5722 !important; color: white !important; transform: scale(1.02);
     }
 
-    /* 8. FORCED SQUARE CARDS FOR FOLDERS */
-    div[data-testid="column"] button {
-        height: 180px !important;
-        width: 100% !important;
-        min-height: 180px !important;
-        aspect-ratio: 1/1 !important;
-        padding: 20px !important;
-        white-space: normal !important;
-        background: linear-gradient(145deg, #1e1e1e, #2b2b2b) !important;
-        border: 1px solid #444 !important;
-        border-radius: 15px !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    div[data-testid="column"] button p {
-        font-size: 20px !important;
-        font-weight: 600 !important;
-        margin-top: 10px !important;
+    /* FEED & GENERAL */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] { gap: 1rem; }
+    thead tr th { background-color: #1e1e1e !important; color: #ff5722 !important; font-size: 16px !important; border-bottom: 2px solid #333 !important; }
+    h1, h2, h3 { color: #f0f0f0; font-weight: 700; letter-spacing: -0.5px; }
+
+    /* TAG PILLS */
+    .tag-pill {
+        display: inline-block; padding: 4px 10px; margin: 0 4px;
+        background-color: #2b2d42; border: 1px solid #ff5722;
+        border-radius: 12px; font-size: 12px; color: #fff; font-weight: 500;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 4. DATABASE MANAGEMENT
-# ==========================================
+# --- 3. DATABASE MANAGEMENT ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON;")
-    
-    tables = [
-        '''CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, uploader TEXT, subject TEXT, title TEXT, filename TEXT, upvotes INTEGER, is_verified INTEGER, tags TEXT, timestamp DATETIME, content TEXT, post_type TEXT)''',
-        '''CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, target_id INTEGER, target_type TEXT, parent_id INTEGER, user TEXT, comment TEXT, timestamp DATETIME)''',
-        '''CREATE TABLE IF NOT EXISTS answers (id INTEGER PRIMARY KEY, doubt_id INTEGER, responder TEXT, answer_text TEXT, upvotes INTEGER, timestamp DATETIME)''',
-        '''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, posts_count INTEGER DEFAULT 0, answers_count INTEGER DEFAULT 0, upvotes_received INTEGER DEFAULT 0, reputation INTEGER DEFAULT 0, full_name TEXT, college TEXT, year TEXT, branch TEXT, age TEXT, gender TEXT, bio TEXT, profile_pic TEXT, is_active INTEGER DEFAULT 1)''',
-        '''CREATE TABLE IF NOT EXISTS votes (user TEXT, item_id INTEGER, item_type TEXT, vote_type INTEGER, PRIMARY KEY (user, item_id, item_type))''',
-        '''CREATE TABLE IF NOT EXISTS bookmarks (user TEXT, note_id INTEGER, timestamp DATETIME, PRIMARY KEY (user, note_id))''',
-        '''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY, user TEXT, message TEXT, is_read INTEGER DEFAULT 0, timestamp DATETIME)''',
-        '''CREATE TABLE IF NOT EXISTS course_requests (id INTEGER PRIMARY KEY, user TEXT, course_name TEXT, reason TEXT, timestamp DATETIME)''',
-        '''CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY, reporter TEXT, post_id INTEGER, reason TEXT, details TEXT, status TEXT DEFAULT 'Pending', timestamp DATETIME)'''
-    ]
-    for table in tables:
-        c.execute(table)
-    
-    conn.commit()
-    conn.close()
+    c.execute('''CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, uploader TEXT, subject TEXT, title TEXT, filename TEXT, upvotes INTEGER, is_verified INTEGER, tags TEXT, timestamp DATETIME, content TEXT, post_type TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, target_id INTEGER, target_type TEXT, parent_id INTEGER, user TEXT, comment TEXT, timestamp DATETIME)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS answers (id INTEGER PRIMARY KEY, doubt_id INTEGER, responder TEXT, answer_text TEXT, upvotes INTEGER, timestamp DATETIME)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, posts_count INTEGER DEFAULT 0, answers_count INTEGER DEFAULT 0, upvotes_received INTEGER DEFAULT 0, reputation INTEGER DEFAULT 0, full_name TEXT, college TEXT, year TEXT, branch TEXT, age TEXT, gender TEXT, bio TEXT, profile_pic TEXT, is_active INTEGER DEFAULT 1)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS votes (user TEXT, item_id INTEGER, item_type TEXT, vote_type INTEGER, PRIMARY KEY (user, item_id, item_type))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS bookmarks (user TEXT, note_id INTEGER, timestamp DATETIME, PRIMARY KEY (user, note_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY, user TEXT, message TEXT, is_read INTEGER DEFAULT 0, timestamp DATETIME)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS course_requests (id INTEGER PRIMARY KEY, user TEXT, course_name TEXT, reason TEXT, timestamp DATETIME)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY, reporter TEXT, post_id INTEGER, reason TEXT, details TEXT, status TEXT DEFAULT 'Pending', timestamp DATETIME)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS follows (follower TEXT, followee TEXT, timestamp DATETIME, PRIMARY KEY (follower, followee))''')
+    conn.commit(); conn.close()
 
-# ==========================================
-# 5. AUTHENTICATION & USER HELPERS
-# ==========================================
-def make_hash(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
+# --- 4. AUTH & HELPERS ---
+def make_hash(password): return hashlib.sha256(str.encode(password)).hexdigest()
 def register_user(username, password, college):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users (username, password, college, is_active) VALUES (?, ?, ?, 1)", 
-                  (username, make_hash(password), college))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
-
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    try: c.execute("INSERT INTO users (username, password, college, is_active) VALUES (?, ?, ?, 1)", (username, make_hash(password), college)); conn.commit(); return True
+    except: return False
+    finally: conn.close()
 def login_user(username, password):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, make_hash(password)))
     data = c.fetchone()
-    
-    # Auto-reactivate if account was deleted/deactivated
-    if data and data[14] == 0: 
-        c.execute("UPDATE users SET is_active = 1 WHERE username = ?", (username,))
-        conn.commit()
-        st.toast("Account Reactivated!")
-    
-    conn.close()
-    return data
+    if data and data[14] == 0: c.execute("UPDATE users SET is_active = 1 WHERE username = ?", (username,)); conn.commit(); st.toast("Reactivated!")
+    conn.close(); return data
 
-# --- STATS & BADGES ---
+# --- STATS, BADGES & PROFILE ---
 def get_user_badge(reputation):
     if reputation > 500: return "🟣 Professor"
     elif reputation > 200: return "🟡 Scholar"
@@ -247,27 +127,18 @@ def get_user_badge(reputation):
     return "⚪ Fresher"
 
 def get_user_stats_detailed(username):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username = ?", (username,))
-    user_data = c.fetchone()
-    
-    if not user_data: return None, 0, 0
-    
-    c.execute("SELECT COUNT(*) FROM notes WHERE uploader = ? AND post_type = 'DOUBT'", (username,))
-    doubts = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM notes WHERE uploader = ? AND post_type = 'RESOURCE'", (username,))
-    notes = c.fetchone()[0]
-    
-    conn.close()
-    return user_data, doubts, notes
+    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row; c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username = ?", (username,)); user_data = c.fetchone()
+    if not user_data: return None, 0, 0, 0, 0
+    c.execute("SELECT COUNT(*) FROM notes WHERE uploader = ? AND post_type = 'DOUBT'", (username,)); doubts = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM notes WHERE uploader = ? AND post_type = 'RESOURCE'", (username,)); notes = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM follows WHERE followee = ?", (username,)); followers = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM follows WHERE follower = ?", (username,)); following = c.fetchone()[0]
+    conn.close(); return user_data, doubts, notes, followers, following
 
 def update_reputation(username):
     if username == "Anonymous": return
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("SELECT posts_count, answers_count, upvotes_received FROM users WHERE username=?", (username,))
     res = c.fetchone()
     if res:
@@ -277,18 +148,15 @@ def update_reputation(username):
     conn.close()
 
 def update_user_profile(username, full_name, year, branch, age, gender, bio, pic_data):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("UPDATE users SET full_name=?, year=?, branch=?, age=?, gender=?, bio=?, profile_pic=? WHERE username=?", 
               (full_name, year, branch, age, gender, bio, pic_data, username))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def change_username(old_user, new_user):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     try:
-        # Cascade update across all tables manually to be safe
+        tables = ["users", "notes", "answers", "comments", "votes", "bookmarks", "notifications", "course_requests", "reports", "follows"]
         c.execute("UPDATE users SET username = ? WHERE username = ?", (new_user, old_user))
         c.execute("UPDATE notes SET uploader = ? WHERE uploader = ?", (new_user, old_user))
         c.execute("UPDATE answers SET responder = ? WHERE responder = ?", (new_user, old_user))
@@ -296,63 +164,75 @@ def change_username(old_user, new_user):
         c.execute("UPDATE votes SET user = ? WHERE user = ?", (new_user, old_user))
         c.execute("UPDATE bookmarks SET user = ? WHERE user = ?", (new_user, old_user))
         c.execute("UPDATE notifications SET user = ? WHERE user = ?", (new_user, old_user))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
+        c.execute("UPDATE follows SET follower = ? WHERE follower = ?", (new_user, old_user))
+        c.execute("UPDATE follows SET followee = ? WHERE followee = ?", (new_user, old_user))
+        conn.commit(); return True
+    except: return False
+    finally: conn.close()
 
 def delete_account(username):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("DELETE FROM users WHERE username = ?", (username,))
-    # Manual cascade delete logic
     c.execute("DELETE FROM notes WHERE uploader = ?", (username,))
     c.execute("DELETE FROM answers WHERE responder = ?", (username,))
     c.execute("DELETE FROM comments WHERE user = ?", (username,))
     c.execute("DELETE FROM votes WHERE user = ?", (username,))
-    conn.commit()
-    conn.close()
+    c.execute("DELETE FROM follows WHERE follower = ? OR followee = ?", (username, username))
+    conn.commit(); conn.close()
 
 def deactivate_account(username):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE users SET is_active = 0 WHERE username = ?", (username,))
-    conn.commit()
-    conn.close()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("UPDATE users SET is_active = 0 WHERE username = ?", (username,)); conn.commit(); conn.close()
 
-# ==========================================
-# 6. NOTIFICATIONS & ACTIONS
-# ==========================================
+# --- SOCIAL: FOLLOW SYSTEM ---
+def follow_user(follower, followee):
+    if follower == followee: return
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    try:
+        c.execute("INSERT INTO follows (follower, followee, timestamp) VALUES (?, ?, ?)", (follower, followee, datetime.now()))
+        conn.commit()
+    except: pass 
+    finally: conn.close()
+    add_notification(followee, f"{follower} started following you!")
+
+def unfollow_user(follower, followee):
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("DELETE FROM follows WHERE follower=? AND followee=?", (follower, followee))
+    conn.commit(); conn.close()
+
+def is_following(follower, followee):
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("SELECT 1 FROM follows WHERE follower=? AND followee=?", (follower, followee))
+    res = c.fetchone()
+    conn.close()
+    return res is not None
+
+def get_followers_list(username):
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("SELECT follower FROM follows WHERE followee=?", (username,))
+    res = [row[0] for row in c.fetchall()]
+    conn.close(); return res
+
+# --- NOTIFICATIONS, BOOKMARKS & REPORTS ---
 def add_notification(target_user, message):
     if target_user == st.session_state.user or target_user == "Anonymous": return
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO notifications (user, message, timestamp) VALUES (?, ?, ?)", (target_user, message, datetime.now()))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def get_unread_notifications(user):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM notifications WHERE user=? AND is_read=0", (user,))
     count = c.fetchone()[0]
     c.execute("SELECT * FROM notifications WHERE user=? ORDER BY timestamp DESC LIMIT 10", (user,))
-    notes = c.fetchall()
-    conn.close()
-    return count, notes
+    notes = c.fetchall(); conn.close(); return count, notes
 
 def mark_notifications_read(user):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE notifications SET is_read=1 WHERE user=?", (user,))
-    conn.commit()
-    conn.close()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("UPDATE notifications SET is_read=1 WHERE user=?", (user,)); conn.commit(); conn.close()
 
 def toggle_bookmark(note_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("SELECT * FROM bookmarks WHERE user=? AND note_id=?", (st.session_state.user, note_id))
     if c.fetchone():
         c.execute("DELETE FROM bookmarks WHERE user=? AND note_id=?", (st.session_state.user, note_id))
@@ -360,282 +240,197 @@ def toggle_bookmark(note_id):
     else:
         c.execute("INSERT INTO bookmarks VALUES (?, ?, ?)", (st.session_state.user, note_id, datetime.now()))
         msg = "Saved"
-    conn.commit()
-    conn.close()
-    st.toast(f"Bookmark {msg}")
-    st.rerun()
+    conn.commit(); conn.close(); st.toast(f"Bookmark {msg}"); st.rerun()
 
 def submit_course_request(user, course_name, reason):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO course_requests (user, course_name, reason, timestamp) VALUES (?, ?, ?, ?)", (user, course_name, reason, datetime.now()))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def submit_report(post_id, reporter, reason, details):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO reports (reporter, post_id, reason, details, timestamp) VALUES (?, ?, ?, ?, ?)", (reporter, post_id, reason, details, datetime.now()))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
-# ==========================================
-# 7. CONTENT CRUD (CREATE, READ, UPDATE, DELETE)
-# ==========================================
+# --- 5. CRUD ---
 def delete_item(table, item_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     if table == "notes":
-        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,))
-        user = c.fetchone()[0]
-        c.execute("DELETE FROM notes WHERE id=?", (item_id,))
-        if user != "Anonymous": 
-            c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
+        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,)); user = c.fetchone()[0]
+        c.execute("DELETE FROM notes WHERE id=?", (item_id,)); 
+        if user != "Anonymous": c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
     elif table == "answers":
-        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,))
-        user = c.fetchone()[0]
-        c.execute("DELETE FROM answers WHERE id=?", (item_id,))
-        if user != "Anonymous": 
-            c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
-    else:
-        c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
-    
-    conn.commit()
-    conn.close()
-    
-    if user != "Anonymous": 
-        update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
-    
-    st.toast(f"{table[:-1].title()} Deleted")
-    st.rerun()
+        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,)); user = c.fetchone()[0]
+        c.execute("DELETE FROM answers WHERE id=?", (item_id,)); 
+        if user != "Anonymous": c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
+    else: c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
+    conn.commit(); conn.close(); 
+    if user != "Anonymous": update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
+    st.toast(f"{table[:-1].title()} Deleted"); st.rerun()
 
 def edit_item(table, item_id, new_text, column="content"):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id))
-    conn.commit()
-    conn.close()
-    st.toast("Updated")
-    st.rerun()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id)); conn.commit(); conn.close(); st.toast("Updated"); st.rerun()
 
 def update_post(note_id, new_title, new_content):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE notes SET title=?, content=? WHERE id=?", (new_title, new_content, note_id))
-    conn.commit()
-    conn.close()
-    st.toast("Updated")
-    st.rerun()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("UPDATE notes SET title=?, content=? WHERE id=?", (new_title, new_content, note_id)); conn.commit(); conn.close(); st.toast("Updated"); st.rerun()
 
 def handle_vote(item_id, item_type, voter, direction):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     table = "notes" if item_type == "NOTE" else "answers"
-    
-    # Get author
-    c.execute(f"SELECT {'uploader' if item_type=='NOTE' else 'responder'} FROM {table} WHERE id = ?", (item_id,))
-    res = c.fetchone()
+    c.execute(f"SELECT {'uploader' if item_type=='NOTE' else 'responder'} FROM {table} WHERE id = ?", (item_id,)); res = c.fetchone()
     if not res: return
     author = res[0]
-    
-    # Check existing vote
     c.execute("SELECT vote_type FROM votes WHERE user=? AND item_id=? AND item_type=?", (voter, item_id, item_type))
-    existing = c.fetchone()
-    change = 0
-    
+    existing = c.fetchone(); change = 0
     if not existing:
         c.execute("INSERT INTO votes VALUES (?, ?, ?, ?)", (voter, item_id, item_type, direction))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (direction, item_id))
-        change = direction
+        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (direction, item_id)); change = direction
     elif existing[0] == direction:
-        # Toggle off
         c.execute("DELETE FROM votes WHERE user=? AND item_id=? AND item_type=?", (voter, item_id, item_type))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes - ? WHERE id = ?", (direction, item_id))
-        change = -direction
+        c.execute(f"UPDATE {table} SET upvotes = upvotes - ? WHERE id = ?", (direction, item_id)); change = -direction
     else:
-        # Switch vote
         c.execute("UPDATE votes SET vote_type=? WHERE user=? AND item_id=? AND item_type=?", (direction, voter, item_id, item_type))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (2*direction, item_id))
-        change = 2*direction
-        
-    if author != "Anonymous": 
-        c.execute("UPDATE users SET upvotes_received = upvotes_received + ? WHERE username = ?", (change, author))
-    
-    conn.commit()
-    conn.close()
+        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (2*direction, item_id)); change = 2*direction
+    if author != "Anonymous": c.execute("UPDATE users SET upvotes_received = upvotes_received + ? WHERE username = ?", (change, author))
+    conn.commit(); conn.close(); 
     if author != "Anonymous": update_reputation(author)
 
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
-    if uploader != "Anonymous": 
+    if uploader != "Anonymous":
         c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
-    conn.commit()
-    conn.close()
+        followers = get_followers_list(uploader)
+        for f in followers:
+            add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
+    conn.commit(); conn.close(); 
     if uploader != "Anonymous": update_reputation(uploader)
 
 def add_answer(doubt_id, user, text, original_uploader):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO answers VALUES (NULL, ?, ?, ?, 0, ?)", (doubt_id, user, text, datetime.now()))
-    if user != "Anonymous": 
-        c.execute("UPDATE users SET answers_count = answers_count + 1 WHERE username = ?", (user,))
-    conn.commit()
-    conn.close()
-    if user != "Anonymous": update_reputation(user)
+    if user != "Anonymous" and user != "🤖 AI Tutor": c.execute("UPDATE users SET answers_count = answers_count + 1 WHERE username = ?", (user,))
+    conn.commit(); conn.close(); 
+    if user != "Anonymous" and user != "🤖 AI Tutor": update_reputation(user)
     add_notification(original_uploader, f"{user} answered your doubt!")
 
 def add_comment(target_id, target_type, user, text, parent_id=None, item_owner=None):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT INTO comments VALUES (NULL, ?, ?, ?, ?, ?, ?)", (target_id, target_type, parent_id, user, text, datetime.now()))
-    conn.commit()
-    conn.close()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("INSERT INTO comments VALUES (NULL, ?, ?, ?, ?, ?, ?)", (target_id, target_type, parent_id, user, text, datetime.now())); conn.commit(); conn.close()
     if item_owner: add_notification(item_owner, f"{user} commented on your {target_type.lower()}.")
 
 def get_data(query, params=()):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute(query, params)
-    return c.fetchall()
+    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row; c = conn.cursor()
+    c.execute(query, params); return c.fetchall()
 
 def search_notes(search_term, subject_filter=None, type_filter=None):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row; c = conn.cursor()
     base = "SELECT * FROM notes WHERE (title LIKE ? OR tags LIKE ?)"
     params = [f"%{search_term}%", f"%{search_term}%"]
     if subject_filter: base += " AND subject = ?"; params.append(subject_filter)
     if type_filter: base += " AND post_type = ?"; params.append(type_filter)
     base += " ORDER BY timestamp DESC"
-    c.execute(base, params)
-    return c.fetchall()
+    c.execute(base, params); return c.fetchall()
 
 def get_pdf_text(pdf_path):
-    text = ""
+    text = ""; 
     try: 
-        reader = PdfReader(pdf_path)
-        for page in reader.pages: 
-            text += page.extract_text() or ""
+        reader = PdfReader(pdf_path); 
+        for page in reader.pages: text += page.extract_text() or ""
     except: pass
     return text
 
-# ==========================================
-# 8. AI INTELLIGENCE (ROBUST & SELF-HEALING)
-# ==========================================
+# --- 6. AI LOGIC (GEMINI 2.5 ONLY) ---
 def get_ai_response(prompt, file_path=None, json_mode=False):
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": 
-        return "Error: API Key missing. Please config."
+    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    # Priority list of models (Newest -> Stable)
-    models_to_try = [
-        "gemini-1.5-flash", 
-        "gemini-1.5-pro", 
-        "gemini-1.0-pro", 
-        "gemini-pro"
-    ]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro"]
     last_error = ""
     
     for model_name in models_to_try:
         try:
             model = genai.GenerativeModel(model_name)
-            
             if file_path:
                 try:
-                    # Vision/File method (Only newer models support this well)
-                    if "flash" in model_name or "1.5" in model_name:
-                        uploaded = genai.upload_file(file_path, mime_type='application/pdf')
-                        # Wait for processing
-                        for _ in range(10):
-                            time.sleep(1)
-                            uploaded = genai.get_file(uploaded.name)
-                            if uploaded.state.name == "ACTIVE": break
-                            if uploaded.state.name == "FAILED": raise Exception("Processing failed")
+                    # Determine MIME type based on extension
+                    mime_type = 'application/pdf'
+                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        mime_type = 'image/jpeg'
                         
-                        response = model.generate_content([uploaded, prompt])
-                        return response.text
-                    else:
-                        # Fallback for older models (text only)
+                    uploaded = genai.upload_file(file_path, mime_type=mime_type)
+                    while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
+                    response = model.generate_content([uploaded, prompt])
+                except Exception as e:
+                    # Fallback for PDFs if upload fails
+                    if file_path.lower().endswith('.pdf'):
                         text = get_pdf_text(file_path)
-                        if len(text.strip()) < 10: return "Error: Could not read text from PDF."
-                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
-                        return response.text
-                except Exception as file_err:
-                    # Fallback to text if file upload fails even on new models
-                    text = get_pdf_text(file_path)
-                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
-                    return response.text
+                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:8000]}")
+                    else: raise e
             else:
                 response = model.generate_content(prompt)
-                return response.text
-            
+            return response.text
         except Exception as e:
             last_error = str(e)
-            
-            # Handle Specific Errors
-            if "429" in last_error: # Quota Exceeded
-                time.sleep(2) # Backoff and try next model
-            elif "404" in last_error: # Model not found (Old library)
-                pass # Just try next model
-            
             continue 
             
-    return f"AI Failed. Last Error: {last_error}. (Tip: Run 'pip install --upgrade google-generativeai')"
+    return f"AI Failed. Last Error: {last_error}"
 
 def clean_json_response(text):
     if not text or text.startswith("Error") or text.startswith("AI"): return None
-    try: 
-        # Clean markdown code blocks
-        text = re.sub(r'```json\n?|```', '', text)
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match: return json.loads(match.group())
-        match_obj = re.search(r'\{.*\}', text, re.DOTALL)
-        if match_obj: return json.loads(match_obj.group())
-        return json.loads(text)
+    try: match = re.search(r'\[.*\]', text, re.DOTALL); return json.loads(match.group()) if match else json.loads(text)
     except: return None
 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
-        'mcq': 'Create 5 MCQs based on the content. JSON Format: [{"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"answer":"Exact Text of Correct Option","hint":"..."}]',
-        'subjective': 'Create 5 short subjective questions. JSON Format: [{"question":"...","model_answer":"...","hint":"..."}]',
-        'flashcard': 'Create 8 flashcards. JSON Format: [{"term":"...","definition":"..."}]',
-        'summary': "Summarize this document in bullet points. Return plain text."
+        'mcq': 'Create 5 MCQs. JSON: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
+        'subjective': 'Create 5 short Qs. JSON: [{"question":"...","model_answer":"...","hint":"..."}]',
+        'flashcard': 'Create 8 flashcards. JSON: [{"term":"...","definition":"..."}]',
+        'summary': "Summarize in bullets. Return text.",
+        'mindmap': "Create a hierarchical mind map. JSON format: {'nodes': ['Central Topic', 'Subtopic 1'], 'edges': [['Central Topic', 'Subtopic 1']]}"
     }
     raw_text = get_ai_response(prompts[task_type], file_path)
     
-    # Check for error message
-    if raw_text.startswith("Error") or raw_text.startswith("AI"):
-        return raw_text
-        
     if task_type == 'summary': return raw_text
+    
+    if task_type == 'mindmap':
+        try:
+            data = clean_json_response(raw_text)
+            dot = graphviz.Digraph(comment='Mind Map')
+            if 'nodes' in data:
+                for n in data['nodes']: dot.node(n)
+            if 'edges' in data:
+                for e in data['edges']: dot.edge(e[0], e[1])
+            return dot
+        except: return None
+
     return clean_json_response(raw_text)
 
-def evaluate_subjective_answer(user_ans, model_ans):
-    prompt = f"""Compare the student's answer to the model answer.
-    Student: "{user_ans}"
-    Model: "{model_ans}"
+def verify_content_with_ai(text, subject):
+    # FIXED: Fail Open Logic. If text is empty (image) or AI fails, we allow it.
+    if not text or len(text.strip()) < 50: return True, "Scanned (Image/Short)"
     
-    Task:
-    1. Score it out of 10.
-    2. Give 1 sentence feedback.
+    prompt = f"""
+    Act as a strict content moderator.
+    Review this text: '{text[:1000]}'.
+    Subject: {subject}.
     
-    Output strictly in JSON: {{"score": int, "feedback": "string"}}
+    Respond in JSON: {{"verdict": "ACCEPT" or "REJECT", "reason": "explanation"}}
+    Reject ONLY if it is spam, hate speech, or gibberish.
     """
     raw = get_ai_response(prompt)
-    if raw and (raw.startswith("Error") or raw.startswith("AI")): return None
-    return clean_json_response(raw)
+    try:
+        data = clean_json_response(raw)
+        if data and data.get("verdict") == "ACCEPT":
+            return True, "Verified"
+        elif data and data.get("verdict") == "REJECT":
+            return False, f"Rejected: {data.get('reason')}"
+        return True, "Verified (AI Uncertain)" # Default allow
+    except:
+        return True, "Verified (AI Error)" # Default allow
 
-def verify_content_with_ai(text, subject):
-    if not text or len(text.strip()) < 50: return True, "Scanned"
-    raw = get_ai_response(f"Is this text SPAM or abusive? Context: Educational notes on {subject}. Text: {text[:500]}. Output only 'VERDICT: ACCEPT' or 'VERDICT: REJECT'.")
-    if raw and "Error" not in raw: return ("VERDICT: ACCEPT" in raw), raw
-    return True, "Error (Allowed)"
-
-# ==========================================
-# 9. UI COMPONENT RENDERERS
-# ==========================================
+# --- 7. UI RENDERERS ---
 def render_comments(target_id, target_type, parent_id=None, level=0):
     query = f"SELECT * FROM comments WHERE target_id=? AND target_type=? AND parent_id {'IS NULL' if parent_id is None else '=?'} ORDER BY timestamp ASC"
     params = (target_id, target_type) if parent_id is None else (target_id, target_type, parent_id)
@@ -649,7 +444,6 @@ def render_comments(target_id, target_type, parent_id=None, level=0):
                 if com['user'] == st.session_state.user:
                     c1, c2 = st.columns([0.5, 9.5])
                     with c1:
-                        # KEY REMOVED FROM POPOVER
                         with st.popover("⋮"):
                             with st.expander("✏️ Edit"):
                                 ed_txt = st.text_input("Edit", value=com['comment'], key=f"ed_com_{com['id']}")
@@ -711,9 +505,16 @@ def render_feed_item(note):
                 if note['uploader'] != "Anonymous":
                     st.session_state.nav = "Profile_View"; st.session_state.view_user = note['uploader']; st.rerun()
             
-            st.caption(f"in *{note['subject']}* • `{note['tags']}`")
+            if note['tags']:
+                tags_list = [t.strip() for t in note['tags'].split('#') if t.strip()]
+                tag_html = "".join([f"<span class='tag-pill'>#{t}</span>" for t in tags_list])
+                st.markdown(f"in *{note['subject']}* &nbsp; {tag_html}", unsafe_allow_html=True)
+            else:
+                st.caption(f"in *{note['subject']}*")
+
             if note['post_type'] == "DOUBT": st.write(note['content'])
             
+            # FILE DISPLAY LOGIC (Handles DOUBTS with Files now)
             if note['filename'] and note['filename'] != "DOUBT":
                 fpath = os.path.join(UPLOAD_FOLDER, note['filename'])
                 if os.path.exists(fpath):
@@ -764,10 +565,15 @@ def render_feed_item(note):
                     c_txt = st.text_input("Comment...")
                     if st.form_submit_button("Post"): add_comment(note['id'], "NOTE", st.session_state.user, c_txt, item_owner=note['uploader']); st.rerun()
 
-# ==========================================
-# 10. MAIN APP CONTROLLER
-# ==========================================
+# --- 8. MAIN APP ---
 init_db()
+if 'user' not in st.session_state: st.session_state.user = None
+if 'err' not in st.session_state: st.session_state.err = None
+if 'nav' not in st.session_state: st.session_state.nav = "Feed"
+if 'view_user' not in st.session_state: st.session_state.view_user = None
+if 'course_tab' not in st.session_state: st.session_state.course_tab = "Notes"
+if 'chat_history' not in st.session_state: st.session_state.chat_history = []
+if 'study_data' not in st.session_state: st.session_state.study_data = None
 
 if not st.session_state.user:
     st.title("IITConnect")
@@ -776,41 +582,30 @@ if not st.session_state.user:
         u = st.text_input("Username"); p = st.text_input("Password", type="password")
         if st.button("Login", use_container_width=True): 
             if login_user(u, p): st.session_state.user = u; st.rerun()
-            else: st.error("Invalid credentials")
+            else: st.error("Invalid")
     with t2:
         u = st.text_input("New User"); p = st.text_input("New Pass", type="password"); c = st.text_input("College (Required)")
         if st.button("Sign Up", use_container_width=True):
-            if register_user(u, p, c): st.success("Created! Login now.")
-            else: st.error("Username taken.")
-
+            if c and u and p:
+                if register_user(u, p, c): st.success("Created!");
+                else: st.error("Taken.")
+            else: st.error("Missing fields.")
 else:
-    # --- SIDEBAR NAVIGATION ---
+    # --- SIDEBAR ---
     with st.sidebar:
-        user_data, _, _ = get_user_stats_detailed(st.session_state.user)
-        if user_data and user_data['profile_pic']:
-            st.markdown(f"""
-            <style>
-                div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button {{
-                    background-image: url("data:image/png;base64,{user_data['profile_pic']}");
-                    background-size: cover;
-                    color: transparent !important;
-                }}
-            </style>
-            """, unsafe_allow_html=True)
-            if st.button("P", key="profile_btn"): st.session_state.nav = "Profile"
-        else:
-            initial = st.session_state.user[0].upper()
-            st.markdown(f"""<style>div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button {{ background-color: #ff5722 !important; }}</style>""", unsafe_allow_html=True)
-            if st.button(initial, key="profile_btn"): st.session_state.nav = "Profile"
+        user_data, _, _, followers_count, following_count = get_user_stats_detailed(st.session_state.user)
         
-        st.markdown(f"<div style='text-align:center;margin-bottom:20px'><b>{st.session_state.user}</b></div>", unsafe_allow_html=True)
+        # 1. PROFILE BUTTON (USERNAME ONLY)
+        if st.button(f"👤 {st.session_state.user}", key="profile_user_btn", use_container_width=True):
+            st.session_state.nav = "Profile"
+        
+        st.write("---")
         
         if st.button("🔥 Campus Feed"): st.session_state.nav = "Feed"
         if st.button("📂 Course Folders"): st.session_state.nav = "Folders"
         if st.button("📝 Contribute"): st.session_state.nav = "Post"
         if st.button("🏆 Leaderboard"): st.session_state.nav = "Leaderboard"
         if st.button("⚡ Study Center"): st.session_state.nav = "Study Center"
-        if st.button("🤖 AI Tutor"): st.session_state.nav = "AI Tutor"
         
         if st.session_state.user == "admin":
             st.markdown("---")
@@ -830,37 +625,16 @@ else:
     menu = st.session_state.nav
 
     # --- PAGES ---
-    if menu == "AI Tutor":
-        st.title("🤖 AI Tutor Chat")
-        st.caption("Ask questions, get explanations, or debug code. (Not saved to database)")
-        
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]): st.markdown(msg["content"])
-            
-        if prompt := st.chat_input("Ask the tutor..."):
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"): st.markdown(prompt)
-            
-            with st.chat_message("assistant"):
-                resp = get_ai_response(prompt)
-                if resp.startswith("Error") or resp.startswith("AI"):
-                    st.error(resp) # Show actual error from AI function
-                else:
-                    st.markdown(resp)
-                    st.session_state.chat_history.append({"role": "assistant", "content": resp})
-
-    elif menu == "Profile":
+    if menu == "Profile":
         st.title("👤 My Profile")
         if user_data:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Reputation", user_data['reputation'])
             c2.metric("Notes", get_user_stats_detailed(st.session_state.user)[2])
-            c3.metric("Doubts", get_user_stats_detailed(st.session_state.user)[1])
-            c4.metric("Answers", user_data['answers_count'])
-            
+            c3.metric("Followers", followers_count)
+            c4.metric("Following", following_count)
             st.write("---")
             t_prof, t_saved = st.tabs(["Edit Profile", "🔖 Saved Items"])
-            
             with t_prof:
                 with st.form("prof_form"):
                     col_l, col_r = st.columns([1, 2])
@@ -904,14 +678,25 @@ else:
         target_user = st.session_state.view_user
         st.title(f"👤 {target_user}")
         if st.button("⬅ Back"): st.session_state.nav = "Feed"; st.rerun()
-        tu_data, tu_doubts, tu_notes = get_user_stats_detailed(target_user)
+        
+        tu_data, tu_doubts, tu_notes, tu_followers, tu_following = get_user_stats_detailed(target_user)
+        
         if tu_data:
-            if tu_data['profile_pic']: st.image(base64.b64decode(tu_data['profile_pic']), width=150)
-            st.write(f"**Bio:** {tu_data['bio'] or 'No bio.'}")
-            c1, c2, c3 = st.columns(3)
+            c_info, c_action = st.columns([3, 1])
+            with c_info:
+                if tu_data['profile_pic']: st.image(base64.b64decode(tu_data['profile_pic']), width=150)
+                st.write(f"**Bio:** {tu_data['bio'] or 'No bio.'}")
+            with c_action:
+                if is_following(st.session_state.user, target_user):
+                    if st.button("Unfollow"): unfollow_user(st.session_state.user, target_user); st.rerun()
+                else:
+                    if st.button("Follow"): follow_user(st.session_state.user, target_user); st.rerun()
+
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("Reputation", tu_data['reputation'])
             c2.metric("Contributions", tu_notes)
-            c3.metric("Answers", tu_data['answers_count'])
+            c3.metric("Followers", tu_followers)
+            c4.metric("Following", tu_following)
         else: st.error("User not found.")
 
     elif menu == "Admin":
@@ -943,7 +728,7 @@ else:
         
         tags_raw = get_data("SELECT tags FROM notes")
         all_tags = []
-        for t in tags_raw: all_tags.extend([x.strip() for x in t['tags'].split(',') if x.strip()])
+        for t in tags_raw: all_tags.extend([x.strip() for x in t['tags'].split('#') if x.strip()])
         top_tags = [t[0] for t in Counter(all_tags).most_common(5)]
         st.write("Trending Topics:")
         cols = st.columns(len(top_tags) + 1)
@@ -965,22 +750,25 @@ else:
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        # FORCE SQUARE CARDS CSS
+        # PAGE SPECIFIC SQUARE CSS INJECTION (FORCE HEIGHT)
         st.markdown("""
         <style>
-        div[data-testid="column"] button {
-            height: 180px !important;
+        div[data-testid="column"] div.stButton > button {
+            height: 12rem !important;
             width: 100% !important;
-            aspect-ratio: 1/1 !important;
-            padding: 20px !important;
+            padding: 2rem !important;
+            font-size: 1.5rem !important;
             white-space: normal !important;
-            background-color: #1e1e1e !important;
-            border: 1px solid #444 !important;
-            border-radius: 15px !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
+            background: linear-gradient(145deg, #1e1e1e, #292929) !important;
+            border: 1px solid #444 !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        }
+        div[data-testid="column"] div.stButton > button p {
+            font-size: 1.5rem !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -1026,20 +814,50 @@ else:
         t1, t2 = st.tabs(["Upload Note", "Ask Doubt"])
         with t1:
             with st.form("u"):
-                ti=st.text_input("Title"); sub=st.selectbox("Subject", ["Physics", "Mathematics", "CS", "Electronics"]); tags=st.text_input("Tags"); f=st.file_uploader("PDF", type="pdf")
+                ti=st.text_input("Title"); sub=st.selectbox("Subject", ["Physics", "Mathematics", "CS", "Electronics"]); tags=st.text_input("Tags (e.g. #Exam #Hard)"); f=st.file_uploader("PDF", type="pdf")
                 if st.form_submit_button("Upload"):
-                    p = os.path.join(UPLOAD_FOLDER, f.name); open(p, "wb").write(f.getbuffer())
-                    with st.spinner("AI Checking..."): v, r = verify_content_with_ai(get_pdf_text(p), sub)
-                    if v: add_note(st.session_state.user, sub, ti, f.name, tags, True); st.success("Posted!")
-                    else: st.session_state.err = f"Rejected: {r}"; st.rerun()
+                    if ti and f:
+                        p = os.path.join(UPLOAD_FOLDER, f.name); open(p, "wb").write(f.getbuffer())
+                        # REMOVED AI BLOCKING: NOW IT JUST POSTS
+                        add_note(st.session_state.user, sub, ti, f.name, tags, True); st.success("Posted!")
+                    else: st.error("Title and File are required.")
         with t2:
             with st.form("d"):
-                ti=st.text_input("Question"); sub=st.selectbox("Sub", ["Physics", "Mathematics", "CS", "Electronics"], key="ds"); tags=st.text_input("Tags"); txt=st.text_area("Details")
+                ti=st.text_input("Question (Required)")
+                sub=st.selectbox("Sub", ["Physics", "Mathematics", "CS", "Electronics"], key="ds")
+                tags=st.text_input("Tags (e.g. #Doubt)")
+                txt=st.text_area("Details (Optional)")
+                f_doubt = st.file_uploader("Attachment (Image/PDF)", type=['png', 'jpg', 'jpeg', 'pdf'])
                 anon = st.checkbox("Ask Anonymously")
+                
                 if st.form_submit_button("Post Doubt"):
-                    uploader_name = "Anonymous" if anon else st.session_state.user
-                    add_note(uploader_name, sub, ti, "DOUBT", tags, True, content=txt, post_type="DOUBT")
-                    st.success("Posted!")
+                    if ti and (txt or f_doubt):
+                        fname = "DOUBT"
+                        fpath = None
+                        if f_doubt:
+                            fname = f_doubt.name
+                            fpath = os.path.join(UPLOAD_FOLDER, fname)
+                            with open(fpath, "wb") as f: f.write(f_doubt.getbuffer())
+                        
+                        uploader_name = "Anonymous" if anon else st.session_state.user
+                        add_note(uploader_name, sub, ti, fname, tags, True, content=txt, post_type="DOUBT")
+                        
+                        # --- AUTO AI ANSWER LOGIC ---
+                        conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+                        c.execute("SELECT id FROM notes WHERE uploader=? ORDER BY id DESC LIMIT 1", (uploader_name,))
+                        new_id_data = c.fetchone()
+                        conn.close()
+                        
+                        if new_id_data:
+                            with st.spinner("🤖 AI is writing an answer..."):
+                                prompt = f"Answer this academic doubt clearly: {ti}\nDetails: {txt}"
+                                ai_reply = get_ai_response(prompt, file_path=fpath)
+                                if ai_reply and not ai_reply.startswith("Error"):
+                                    add_answer(new_id_data[0], "🤖 AI Tutor", ai_reply, uploader_name)
+                        
+                        st.success("Posted & Answered by AI!")
+                    else:
+                        st.error("Title is required. You must also provide either Details or an Attachment.")
 
     elif menu == "Leaderboard":
         st.title("🏆 Hall of Fame")
@@ -1053,8 +871,8 @@ else:
         if 'study_mode_sel' not in st.session_state: st.session_state.study_mode_sel = None
 
         if st.session_state.study_mode_sel is None:
-            # FORCE SQUARE CARDS CSS
-            st.markdown("""<style>div[data-testid="column"] button {height: 180px !important; width: 100% !important; aspect-ratio: 1/1 !important; padding: 20px !important; white-space: normal !important; background-color: #1e1e1e !important; border: 1px solid #444 !important; border-radius: 15px !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;}</style>""", unsafe_allow_html=True)
+            # FORCE SQUARE CARDS
+            st.markdown("""<style>div[data-testid="column"] div.stButton > button {height: 12rem !important; width: 100% !important; aspect-ratio: 1/1 !important; border-radius: 20px !important; font-size: 1.5rem !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: linear-gradient(145deg, #1e1e1e, #292929) !important; border: 1px solid #444 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;}</style>""", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
@@ -1086,85 +904,52 @@ else:
                             with st.spinner("Generating..."):
                                 st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
                                 st.session_state.quiz_answers = {}
-                        
-                        # NEW: Check if error message returned
-                        if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
-                            st.error(st.session_state.study_data)
-                        elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
+                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
                             for i, q in enumerate(st.session_state.study_data):
                                 st.markdown(f"**Q{i+1}: {q['question']}**")
-                                # Read state directly to persist selection
-                                st.radio("Select:", q['options'], key=f"mq_{i}", index=None)
+                                st.session_state.quiz_answers[i] = st.radio("Select:", q['options'], key=f"mq_{i}", index=None)
                                 st.divider()
-                            
                             if st.button("📝 Submit Quiz"):
                                 score = 0
                                 for i, q in enumerate(st.session_state.study_data):
-                                    # Fetch answer from state
-                                    u_ans = st.session_state.get(f"mq_{i}")
-                                    is_correct = False
-                                    
-                                    if u_ans:
-                                        # SUPER FUZZY MATCHING LOGIC
-                                        # Remove "A.", "B.", punctuation, and lowercase
-                                        u_clean = re.sub(r'^[A-D]\.?\s*', '', u_ans).strip().lower()
-                                        u_clean = re.sub(r'[^\w\s]', '', u_clean) # Remove special chars
-                                        
-                                        a_clean = re.sub(r'^[A-D]\.?\s*', '', q['answer']).strip().lower()
-                                        a_clean = re.sub(r'[^\w\s]', '', a_clean)
-
-                                        # Check if overlapping content exists
-                                        if u_clean and a_clean and (u_clean in a_clean or a_clean in u_clean):
-                                            is_correct = True
-                                        
-                                        # Debug fallback: Exact match on raw string just in case
-                                        if u_ans == q['answer']: is_correct = True
-                                    
-                                    if is_correct: score += 1
+                                    u_ans = st.session_state.quiz_answers.get(i)
+                                    if u_ans and u_ans.strip() == q['answer'].strip(): score += 1
                                     else: st.error(f"Q{i+1}: Incorrect. Answer: {q['answer']}")
                                 st.balloons(); st.success(f"Final Score: {score} / {len(st.session_state.study_data)}")
                     with t2:
                         if st.button("Generate Subjective"):
                             with st.spinner("Generating..."): st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
-                        
-                        # NEW: Check if error message returned
-                        if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
-                            st.error(st.session_state.study_data)
-                        elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
+                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
                             for i, q in enumerate(st.session_state.study_data):
-                                st.write(f"**Q{i+1}: {q['question']}**")
-                                user_sub_ans = st.text_area(f"Write your answer here:", key=f"sub_input_{i}")
-                                c_chk, c_show = st.columns(2)
-                                with c_chk:
-                                    if st.button(f"⚡ Check Answer {i+1}", key=f"chk_{i}"):
-                                        if user_sub_ans.strip():
-                                            with st.spinner("AI Grading..."):
-                                                eval_res = evaluate_subjective_answer(user_sub_ans, q['model_answer'])
-                                                if eval_res: st.info(f"**Score: {eval_res['score']}/10**\n\nFeedback: {eval_res['feedback']}")
-                                                else: st.error("AI Busy. Try again.")
-                                        else: st.warning("Please write an answer first.")
-                                with c_show:
-                                    with st.popover(f"Show Model Answer"): st.success(q['model_answer'])
+                                st.write(f"**Q{i+1}: {q['question']}**"); 
+                                if st.button(f"Show Answer {i+1}"): st.success(q['model_answer'])
                                 st.divider()
                 elif st.session_state.study_mode_sel == "Tools":
-                    t1, t2 = st.tabs(["Summary", "Flashcards"])
+                    t1, t2, t3 = st.tabs(["Summary", "Flashcards", "Mind Map"])
                     with t1:
                         if st.button("Summarize"):
                             with st.spinner("Reading..."): st.session_state.study_data = generate_ai_content(file_path, "summary", force_vision)
-                        if isinstance(st.session_state.study_data, str):
-                            if st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI"): st.error(st.session_state.study_data)
-                            else: st.markdown(st.session_state.study_data)
+                        if st.session_state.study_data and isinstance(st.session_state.study_data, str): st.markdown(st.session_state.study_data)
                     with t2:
                         if st.button("Make Flashcards"):
                             with st.spinner("Thinking..."): st.session_state.study_data = generate_ai_content(file_path, "flashcard", force_vision)
-                        
-                        if isinstance(st.session_state.study_data, str) and (st.session_state.study_data.startswith("Error") or st.session_state.study_data.startswith("AI")):
-                            st.error(st.session_state.study_data)
-                        elif st.session_state.study_data and isinstance(st.session_state.study_data, list) and "term" in st.session_state.study_data[0]:
+                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "term" in st.session_state.study_data[0]:
                             c1, c2 = st.columns(2)
                             for i, c in enumerate(st.session_state.study_data):
                                 with (c1 if i%2==0 else c2):
                                     with st.container(border=True):
                                         st.markdown(f"### {c['term']}")
                                         with st.expander("Reveal"): st.info(c['definition'])
-                                        # dhimant
+                    with t3:
+                        if st.button("Generate Mind Map"):
+                            with st.spinner("Analyzing structure..."): 
+                                st.session_state.study_data = generate_ai_content(file_path, "mindmap", force_vision)
+                        
+                        if st.session_state.study_data:
+                            try:
+                                if hasattr(st.session_state.study_data, 'pipe'):
+                                    st.graphviz_chart(st.session_state.study_data)
+                                else:
+                                    st.warning("Mind map data unavailable. Try again.")
+                            except Exception as e:
+                                st.error(f"Visualization Error. Ensure graphviz is installed. {e}")
