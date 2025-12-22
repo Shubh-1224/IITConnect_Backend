@@ -17,7 +17,7 @@ import graphviz
 # --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-#SECURE KEY HANDLING
+# SECURE KEY HANDLING
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except FileNotFoundError:
@@ -25,6 +25,7 @@ except FileNotFoundError:
     st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
+
 # CONSTANTS
 DB_NAME = "iitconnect_v52.db"
 UPLOAD_FOLDER = "uploaded_notes"
@@ -36,42 +37,68 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
+    /* General Button Styling */
     div.stButton > button {
         width: 100%; border-radius: 12px; height: 3.2em;
         background-color: #2b2d42; color: white; border: 1px solid #3d405b;
-        font-weight: 500; transition: all 0.3s ease;
+        font-weight: 600; transition: all 0.3s ease;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     div.stButton > button:hover {
         border-color: #ff5722; background-color: #3d405b;
         transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
-    section[data-testid="stSidebar"] { background-color: #1a1a1a; }
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] { background-color: #121212; border-right: 1px solid #333; }
     section[data-testid="stSidebar"] div.stButton > button {
         text-align: left; padding-left: 20px; border: none; background-color: transparent;
     }
     section[data-testid="stSidebar"] div.stButton > button:hover {
         background-color: #333; color: #ff5722;
     }
-    div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button {
-        background: transparent !important;
-        border: 2px solid #ff5722 !important;
-        color: #ff5722 !important;
-        font-size: 22px !important;
-        font-weight: 800 !important;
-        text-align: center !important;
-        height: 3.5em !important;
-        border-radius: 15px !important;
-        margin-bottom: 20px !important;
-        box-shadow: none !important;
-    }
-    div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button:hover {
-        background-color: #ff5722 !important; color: white !important; transform: scale(1.02);
-    }
+
+    /* Tags */
     .tag-pill {
         display: inline-block; padding: 4px 10px; margin: 0 4px;
         background-color: #2b2d42; border: 1px solid #ff5722;
         border-radius: 12px; font-size: 12px; color: #fff; font-weight: 500;
+    }
+
+    /* --- LANDING PAGE SPECIFIC CSS --- */
+    .hero-title {
+        font-size: 4rem !important;
+        font-weight: 800 !important;
+        background: -webkit-linear-gradient(45deg, #ff5722, #da2eef);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0px;
+    }
+    .hero-sub {
+        font-size: 1.5rem;
+        color: #b0b0b0;
+        margin-bottom: 30px;
+    }
+    .feature-box {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 10px;
+        transition: transform 0.3s;
+    }
+    .feature-box:hover {
+        transform: scale(1.02);
+        background: rgba(255, 255, 255, 0.08);
+    }
+    
+    /* Login Card */
+    .login-card {
+        background: #1e1e1e;
+        padding: 30px;
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        border: 1px solid #333;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -330,7 +357,7 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (FORCED GEMINI 1.5 FLASH) ---
+# --- 6. AI LOGIC (FORCED GEMINI 2.5) ---
 def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
@@ -542,7 +569,69 @@ def render_feed_item(note):
                     c_txt = st.text_input("Comment...")
                     if st.form_submit_button("Post"): add_comment(note['id'], "NOTE", st.session_state.user, c_txt, item_owner=note['uploader']); st.rerun()
 
-# --- 8. MAIN APP ---
+# --- 8. LANDING PAGE & MAIN LOGIC ---
+
+def landing_page():
+    # Fetch some dummy stats for the landing page
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users"); u_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM notes"); n_count = c.fetchone()[0]
+    conn.close()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col_hero, col_login = st.columns([1.5, 1], gap="large")
+
+    with col_hero:
+        st.markdown('<p class="hero-title">IITConnect</p>', unsafe_allow_html=True)
+        st.markdown('<p class="hero-sub">The ultimate academic social network for IITians. Share notes, clear doubts, and grow together.</p>', unsafe_allow_html=True)
+        
+        # Live Stats Row
+        s1, s2, s3 = st.columns(3)
+        with s1: st.metric("Students", f"{u_count}+", "+12 today")
+        with s2: st.metric("Resources", f"{n_count}+", "+5 today")
+        with s3: st.metric("Colleges", "23", "All IITs")
+
+        st.markdown("### 🚀 Why Join?")
+        st.markdown("""
+        <div class="feature-box">
+            <h4>📚 Crowd-Sourced Notes</h4>
+            <p>Access high-quality handwritten notes, slides, and papers shared by toppers from across all IITs.</p>
+        </div>
+        <div class="feature-box">
+            <h4>🤖 AI Study Assistant</h4>
+            <p>Stuck on a concept? Our Gemini-powered AI tutor creates quizzes, flashcards, and explains doubts instantly.</p>
+        </div>
+        <div class="feature-box">
+            <h4>🏆 Reputation System</h4>
+            <p>Earn badges like 'Scholar' or 'Professor' by helping others. Build your academic profile.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_login:
+        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+        action = st.radio("Choose Action", ["🔐 Login", "📝 Register"], horizontal=True, label_visibility="collapsed")
+        
+        if action == "🔐 Login":
+            st.subheader("Welcome Back!")
+            u = st.text_input("Username", key="l_user")
+            p = st.text_input("Password", type="password", key="l_pass")
+            if st.button("🚀 Login Now", use_container_width=True): 
+                if login_user(u, p): st.session_state.user = u; st.rerun()
+                else: st.error("Invalid username or password")
+        else:
+            st.subheader("Join the Community")
+            u = st.text_input("Choose Username", key="r_user")
+            p = st.text_input("Choose Password", type="password", key="r_pass")
+            c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "Other"])
+            if st.button("✨ Create Account", use_container_width=True):
+                if c and u and p:
+                    if register_user(u, p, c): st.success("Account created! Go to Login.");
+                    else: st.error("Username already taken.")
+                else: st.error("All fields are required.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# --- INITIALIZATION ---
 init_db()
 if 'user' not in st.session_state: st.session_state.user = None
 if 'err' not in st.session_state: st.session_state.err = None
@@ -552,21 +641,9 @@ if 'course_tab' not in st.session_state: st.session_state.course_tab = "Notes"
 if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 if 'study_data' not in st.session_state: st.session_state.study_data = None
 
+# --- MAIN NAVIGATION CONTROLLER ---
 if not st.session_state.user:
-    st.title("IITConnect")
-    t1, t2 = st.tabs(["Login", "Register"])
-    with t1:
-        u = st.text_input("Username"); p = st.text_input("Password", type="password")
-        if st.button("Login", use_container_width=True): 
-            if login_user(u, p): st.session_state.user = u; st.rerun()
-            else: st.error("Invalid")
-    with t2:
-        u = st.text_input("New User"); p = st.text_input("New Pass", type="password"); c = st.text_input("College (Required)")
-        if st.button("Sign Up", use_container_width=True):
-            if c and u and p:
-                if register_user(u, p, c): st.success("Created!");
-                else: st.error("Taken.")
-            else: st.error("Missing fields.")
+    landing_page()
 else:
     # --- SIDEBAR ---
     with st.sidebar:
@@ -887,10 +964,17 @@ else:
                     st.error(st.session_state.study_data)
                 elif st.session_state.study_data:
                     try:
-                        if isinstance(st.session_state.study_data, str) and ("digraph" in st.session_state.study_data or "graph" in st.session_state.study_data):
-                            st.graphviz_chart(st.session_state.study_data)
+                        source = st.session_state.study_data
+                        if isinstance(source, str) and ("digraph" in source or "graph" in source):
+                            # --- FIX: Inject styling for better visibility ---
+                            # 1. Force Left-to-Right layout (taller, not wider)
+                            # 2. Increase font size and box styling
+                            if "rankdir" not in source:
+                                source = source.replace("{", '{\n  graph [rankdir=LR, splines=ortho];\n  node [shape=box, style="filled,rounded", fillcolor="#f0f2f6", fontname="Arial", fontsize=12];\n  edge [penwidth=1.2];\n', 1)
+                            
+                            st.graphviz_chart(source, use_container_width=True)
                         else:
-                            st.warning("Click 'Generate' to create a map.")
+                            st.info("⚠️ Please click 'Generate Mind Map' to view.")
                     except Exception as e:
                         st.error(f"Rendering Error: {e}")
 
@@ -901,10 +985,7 @@ else:
                 
                 if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
                     st.error(st.session_state.study_data)
-                
-                # --- FIX STARTS HERE ---
                 elif isinstance(st.session_state.study_data, list):
-                    # Check if the data actually looks like flashcards (has 'term')
                     if len(st.session_state.study_data) > 0 and 'term' not in st.session_state.study_data[0]:
                         st.info("⚠️ Current data is not in Flashcard format. Please click 'Generate Flashcards'.")
                     else:
@@ -912,13 +993,10 @@ else:
                         for i, c in enumerate(st.session_state.study_data):
                             with (c1 if i%2==0 else c2):
                                 with st.container(border=True):
-                                    # Use .get() as a backup to prevent crashing
                                     term = c.get('term', 'Unknown Term')
                                     definition = c.get('definition', 'No definition found')
-                                    
                                     st.markdown(f"### {term}")
                                     with st.expander("Reveal Definition"): st.info(definition)
-                # --- FIX ENDS HERE ---
 
             with t4:
                 if st.button("Generate MCQs"):
