@@ -357,37 +357,56 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (FORCED GEMINI 2.5) ---
+# --- 6. AI LOGIC (FORCED GEMINI 2.5 WITH RETRY LOGIC) ---
 def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    # HARDCODED STABLE MODEL TO FIX 404/429
     model_name = "gemini-2.5-flash"
+    max_retries = 3  # How many times to retry
     
-    try:
-        model = genai.GenerativeModel(model_name)
-        if file_path:
-            try:
-                mime_type = 'application/pdf'
-                if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    mime_type = 'image/jpeg'
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(model_name)
+            if file_path:
+                try:
+                    mime_type = 'application/pdf'
+                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        mime_type = 'image/jpeg'
+                        
+                    uploaded = genai.upload_file(file_path, mime_type=mime_type)
                     
-                uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
-                response = model.generate_content([uploaded, prompt])
-            except Exception as e:
-                # Fallback for text extraction if vision fails
-                if file_path.lower().endswith('.pdf'):
-                    text = get_pdf_text(file_path)
-                    if not text: raise ValueError("Empty PDF text")
-                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
-                else: raise e
-        else:
-            response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        time.sleep(2) # Simple backoff
-        return f"AI Failed. Error: {str(e)}"
+                    # Wait for processing loop
+                    while uploaded.state.name == "PROCESSING": 
+                        time.sleep(1)
+                        uploaded = genai.get_file(uploaded.name)
+                    
+                    response = model.generate_content([uploaded, prompt])
+                except Exception as inner_e:
+                    # Fallback: Extract text manually if visual upload fails
+                    if file_path.lower().endswith('.pdf'):
+                        text = get_pdf_text(file_path)
+                        if not text: raise ValueError("Empty PDF text")
+                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
+                    else: 
+                        raise inner_e
+            else:
+                response = model.generate_content(prompt)
+            
+            return response.text
+
+        except Exception as e:
+            error_msg = str(e)
+            # Check for Rate Limit (429) or Overloaded (503) errors
+            if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 5  # Wait 5s, then 10s, then 15s
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return "⚠️ High Traffic: The free AI quota is currently full. Please wait 1 minute and try again."
+            
+            # If it's a different error, fail immediately
+            return f"AI Failed. Error: {error_msg}"
 
 def extract_json_from_text(text):
     if not text: return None
