@@ -901,13 +901,24 @@ else:
                 
                 if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
                     st.error(st.session_state.study_data)
+                
+                # --- FIX STARTS HERE ---
                 elif isinstance(st.session_state.study_data, list):
-                    c1, c2 = st.columns(2)
-                    for i, c in enumerate(st.session_state.study_data):
-                        with (c1 if i%2==0 else c2):
-                            with st.container(border=True):
-                                st.markdown(f"### {c['term']}")
-                                with st.expander("Reveal Definition"): st.info(c['definition'])
+                    # Check if the data actually looks like flashcards (has 'term')
+                    if len(st.session_state.study_data) > 0 and 'term' not in st.session_state.study_data[0]:
+                        st.info("⚠️ Current data is not in Flashcard format. Please click 'Generate Flashcards'.")
+                    else:
+                        c1, c2 = st.columns(2)
+                        for i, c in enumerate(st.session_state.study_data):
+                            with (c1 if i%2==0 else c2):
+                                with st.container(border=True):
+                                    # Use .get() as a backup to prevent crashing
+                                    term = c.get('term', 'Unknown Term')
+                                    definition = c.get('definition', 'No definition found')
+                                    
+                                    st.markdown(f"### {term}")
+                                    with st.expander("Reveal Definition"): st.info(definition)
+                # --- FIX ENDS HERE ---
 
             with t4:
                 if st.button("Generate MCQs"):
@@ -917,13 +928,16 @@ else:
                 if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
                     st.error(st.session_state.study_data)
                 elif isinstance(st.session_state.study_data, list):
-                    for i, q in enumerate(st.session_state.study_data):
-                        st.markdown(f"**{i+1}. {q['question']}**")
-                        st.radio(f"Options for Q{i+1}", q['options'], key=f"mcq_{i}", index=None)
-                        with st.expander(f"Show Answer {i+1}"):
-                            st.success(f"Correct Answer: {q['answer']}")
-                            st.caption(f"Hint: {q.get('hint', '')}")
-                        st.divider()
+                    if len(st.session_state.study_data) > 0 and 'options' not in st.session_state.study_data[0]:
+                        st.info("⚠️ Current data is not in Quiz format. Please click 'Generate MCQs'.")
+                    else:
+                        for i, q in enumerate(st.session_state.study_data):
+                            st.markdown(f"**{i+1}. {q['question']}**")
+                            st.radio(f"Options for Q{i+1}", q['options'], key=f"mcq_{i}", index=None)
+                            with st.expander(f"Show Answer {i+1}"):
+                                st.success(f"Correct Answer: {q['answer']}")
+                                st.caption(f"Hint: {q.get('hint', '')}")
+                            st.divider()
 
             with t5:
                 if st.button("Generate Subjective"):
@@ -933,8 +947,11 @@ else:
                 if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
                     st.error(st.session_state.study_data)
                 elif isinstance(st.session_state.study_data, list):
-                    for i, q in enumerate(st.session_state.study_data):
-                        st.markdown(f"**Q{i+1}: {q['question']}**")
-                        with st.expander("Show Model Answer"):
-                            st.write(q['model_answer'])
-                        st.divider()
+                    if len(st.session_state.study_data) > 0 and 'model_answer' not in st.session_state.study_data[0]:
+                        st.info("⚠️ Current data is not in Subjective format. Please click 'Generate Subjective'.")
+                    else:
+                        for i, q in enumerate(st.session_state.study_data):
+                            st.markdown(f"**Q{i+1}: {q['question']}**")
+                            with st.expander("Show Model Answer"):
+                                st.write(q['model_answer'])
+                            st.divider()
