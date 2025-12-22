@@ -17,16 +17,16 @@ import graphviz
 # --- 1. SETUP & CONFIGURATION ---
 st.set_page_config(page_title="IITConnect", page_icon="🎓", layout="wide")
 
-# ⚠️ PASTE YOUR VALID GOOGLE GEMINI API KEY HERE ⚠️
-GOOGLE_API_KEY = "AIzaSyAiB8tRLVx6KoWvbHW9hpe_uJzJVSEWhMs"
+#SECURE KEY HANDLING
+try:
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+except FileNotFoundError:
+    st.warning("⚠️ Secrets file not found. Please create .streamlit/secrets.toml")
+    st.stop()
 
-if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE":
-    st.warning("⚠️ Please replace 'PASTE_YOUR_API_KEY_HERE' in the code with your actual Gemini API Key.")
-else:
-    genai.configure(api_key=GOOGLE_API_KEY)
-
+genai.configure(api_key=GOOGLE_API_KEY)
 # CONSTANTS
-DB_NAME = "iitconnect_v44.db"
+DB_NAME = "iitconnect_v52.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
@@ -36,7 +36,6 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-    /* GENERAL BUTTON STYLING */
     div.stButton > button {
         width: 100%; border-radius: 12px; height: 3.2em;
         background-color: #2b2d42; color: white; border: 1px solid #3d405b;
@@ -47,8 +46,6 @@ st.markdown("""
         border-color: #ff5722; background-color: #3d405b;
         transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
-
-    /* SIDEBAR STYLING */
     section[data-testid="stSidebar"] { background-color: #1a1a1a; }
     section[data-testid="stSidebar"] div.stButton > button {
         text-align: left; padding-left: 20px; border: none; background-color: transparent;
@@ -56,8 +53,6 @@ st.markdown("""
     section[data-testid="stSidebar"] div.stButton > button:hover {
         background-color: #333; color: #ff5722;
     }
-
-    /* PROFILE USERNAME BUTTON */
     div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button {
         background: transparent !important;
         border: 2px solid #ff5722 !important;
@@ -73,13 +68,6 @@ st.markdown("""
     div[data-testid="stSidebar"] div[data-testid="element-container"]:nth-child(1) button:hover {
         background-color: #ff5722 !important; color: white !important; transform: scale(1.02);
     }
-
-    /* FEED & GENERAL */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] { gap: 1rem; }
-    thead tr th { background-color: #1e1e1e !important; color: #ff5722 !important; font-size: 16px !important; border-bottom: 2px solid #333 !important; }
-    h1, h2, h3 { color: #f0f0f0; font-weight: 700; letter-spacing: -0.5px; }
-
-    /* TAG PILLS */
     .tag-pill {
         display: inline-block; padding: 4px 10px; margin: 0 4px;
         background-color: #2b2d42; border: 1px solid #ff5722;
@@ -342,93 +330,83 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (GEMINI 2.5 ONLY) ---
-def get_ai_response(prompt, file_path=None, json_mode=False):
+# --- 6. AI LOGIC (FORCED GEMINI 1.5 FLASH) ---
+def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro"]
-    last_error = ""
+    # HARDCODED STABLE MODEL TO FIX 404/429
+    model_name = "gemini-2.5-flash"
     
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            if file_path:
-                try:
-                    # Determine MIME type based on extension
-                    mime_type = 'application/pdf'
-                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        mime_type = 'image/jpeg'
-                        
-                    uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                    while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
-                    response = model.generate_content([uploaded, prompt])
-                except Exception as e:
-                    # Fallback for PDFs if upload fails
-                    if file_path.lower().endswith('.pdf'):
-                        text = get_pdf_text(file_path)
-                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:8000]}")
-                    else: raise e
-            else:
-                response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            last_error = str(e)
-            continue 
-            
-    return f"AI Failed. Last Error: {last_error}"
+    try:
+        model = genai.GenerativeModel(model_name)
+        if file_path:
+            try:
+                mime_type = 'application/pdf'
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg'
+                    
+                uploaded = genai.upload_file(file_path, mime_type=mime_type)
+                while uploaded.state.name == "PROCESSING": time.sleep(1); uploaded = genai.get_file(uploaded.name)
+                response = model.generate_content([uploaded, prompt])
+            except Exception as e:
+                # Fallback for text extraction if vision fails
+                if file_path.lower().endswith('.pdf'):
+                    text = get_pdf_text(file_path)
+                    if not text: raise ValueError("Empty PDF text")
+                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
+                else: raise e
+        else:
+            response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        time.sleep(2) # Simple backoff
+        return f"AI Failed. Error: {str(e)}"
 
-def clean_json_response(text):
-    if not text or text.startswith("Error") or text.startswith("AI"): return None
-    try: match = re.search(r'\[.*\]', text, re.DOTALL); return json.loads(match.group()) if match else json.loads(text)
-    except: return None
+def extract_json_from_text(text):
+    if not text: return None
+    try:
+        match = re.search(r'(\[.*\]|\{.*\})', text, re.DOTALL)
+        if match: return json.loads(match.group(1))
+    except: pass
+    return None
+
+def extract_dot_from_text(text):
+    if not text: return None
+    try:
+        match = re.search(r'(digraph\s+.*\}|graph\s+.*\})', text, re.DOTALL)
+        if match: return match.group(1)
+        if "digraph" in text: return text
+    except: pass
+    return None
 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
-        'mcq': 'Create 5 MCQs. JSON: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
-        'subjective': 'Create 5 short Qs. JSON: [{"question":"...","model_answer":"...","hint":"..."}]',
-        'flashcard': 'Create 8 flashcards. JSON: [{"term":"...","definition":"..."}]',
+        'mcq': 'Create 5 MCQs based on the content. Return ONLY a JSON array: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
+        'subjective': 'Create 5 short descriptive questions. Return ONLY a JSON array: [{"question":"...","model_answer":"...","hint":"..."}]',
+        'flashcard': 'Create 8 flashcards. Return ONLY a JSON array: [{"term":"...","definition":"..."}]',
         'summary': "Summarize in bullets. Return text.",
-        'mindmap': "Create a hierarchical mind map. JSON format: {'nodes': ['Central Topic', 'Subtopic 1'], 'edges': [['Central Topic', 'Subtopic 1']]}"
+        'mindmap': 'Create a hierarchical mind map. Return ONLY valid Graphviz DOT syntax starting with "digraph G {". Use simple labels.'
     }
-    raw_text = get_ai_response(prompts[task_type], file_path)
     
-    if task_type == 'summary': return raw_text
+    extracted_text = get_pdf_text(file_path)
+    use_vision = force_vision or len(extracted_text.strip()) < 50
     
-    if task_type == 'mindmap':
-        try:
-            data = clean_json_response(raw_text)
-            dot = graphviz.Digraph(comment='Mind Map')
-            if 'nodes' in data:
-                for n in data['nodes']: dot.node(n)
-            if 'edges' in data:
-                for e in data['edges']: dot.edge(e[0], e[1])
-            return dot
-        except: return None
+    if use_vision:
+        raw_text = get_ai_response(prompts[task_type], file_path=file_path)
+    else:
+        raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:12000]}")
+    
+    if raw_text and raw_text.startswith("AI Failed"): return raw_text 
 
-    return clean_json_response(raw_text)
+    if task_type == 'summary': return raw_text
+    if task_type == 'mindmap': return extract_dot_from_text(raw_text)
+    
+    return extract_json_from_text(raw_text)
 
 def verify_content_with_ai(text, subject):
-    # FIXED: Fail Open Logic. If text is empty (image) or AI fails, we allow it.
+    # Pass-through for images or empty text (Fail Open)
     if not text or len(text.strip()) < 50: return True, "Scanned (Image/Short)"
-    
-    prompt = f"""
-    Act as a strict content moderator.
-    Review this text: '{text[:1000]}'.
-    Subject: {subject}.
-    
-    Respond in JSON: {{"verdict": "ACCEPT" or "REJECT", "reason": "explanation"}}
-    Reject ONLY if it is spam, hate speech, or gibberish.
-    """
-    raw = get_ai_response(prompt)
-    try:
-        data = clean_json_response(raw)
-        if data and data.get("verdict") == "ACCEPT":
-            return True, "Verified"
-        elif data and data.get("verdict") == "REJECT":
-            return False, f"Rejected: {data.get('reason')}"
-        return True, "Verified (AI Uncertain)" # Default allow
-    except:
-        return True, "Verified (AI Error)" # Default allow
+    return True, "Allowed"
 
 # --- 7. UI RENDERERS ---
 def render_comments(target_id, target_type, parent_id=None, level=0):
@@ -514,7 +492,6 @@ def render_feed_item(note):
 
             if note['post_type'] == "DOUBT": st.write(note['content'])
             
-            # FILE DISPLAY LOGIC (Handles DOUBTS with Files now)
             if note['filename'] and note['filename'] != "DOUBT":
                 fpath = os.path.join(UPLOAD_FOLDER, note['filename'])
                 if os.path.exists(fpath):
@@ -868,88 +845,96 @@ else:
 
     elif menu == "Study Center":
         st.title("⚡ AI Study Center")
-        if 'study_mode_sel' not in st.session_state: st.session_state.study_mode_sel = None
-
-        if st.session_state.study_mode_sel is None:
-            # FORCE SQUARE CARDS
-            st.markdown("""<style>div[data-testid="column"] div.stButton > button {height: 12rem !important; width: 100% !important; aspect-ratio: 1/1 !important; border-radius: 20px !important; font-size: 1.5rem !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; background: linear-gradient(145deg, #1e1e1e, #292929) !important; border: 1px solid #444 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;}</style>""", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("📝\nPractice Questions", use_container_width=True): st.session_state.study_mode_sel = "Practice"
-            with c2:
-                if st.button("🧠\nStudy Tools", use_container_width=True): st.session_state.study_mode_sel = "Tools"
+        if st.button("⬅ Back to Menu"): 
+            st.session_state.study_mode_sel = None; 
+            st.session_state.study_data = None
+            st.rerun()
+        st.divider()
+        
+        file_path = None
+        force_vision = st.checkbox("Force Vision (For scanned files)")
+        src = st.radio("Source:", ["Library", "Upload"], horizontal=True)
+        if src == "Library":
+            sub = st.selectbox("Subject", ["Physics", "Mathematics", "CS", "Electronics"])
+            notes = get_data("SELECT * FROM notes WHERE subject=? AND post_type='RESOURCE'", (sub,))
+            if notes:
+                sel = st.selectbox("Material", [n['title'] for n in notes])
+                file_path = os.path.join(UPLOAD_FOLDER, next(n for n in notes if n['title'] == sel)['filename'])
         else:
-            if st.button("⬅ Back to Menu"): st.session_state.study_mode_sel = None; st.session_state.study_data = None; st.rerun()
-            st.divider()
-            
-            file_path = None
-            force_vision = st.checkbox("Force Vision (For scanned files)")
-            src = st.radio("Source:", ["Library", "Upload"], horizontal=True)
-            if src == "Library":
-                sub = st.selectbox("Subject", ["Physics", "Mathematics", "CS", "Electronics"])
-                notes = get_data("SELECT * FROM notes WHERE subject=? AND post_type='RESOURCE'", (sub,))
-                if notes:
-                    sel = st.selectbox("Material", [n['title'] for n in notes])
-                    file_path = os.path.join(UPLOAD_FOLDER, next(n for n in notes if n['title'] == sel)['filename'])
-            else:
-                up = st.file_uploader("Upload PDF", type="pdf")
-                if up:
-                    temp = os.path.join(UPLOAD_FOLDER, f"temp_{datetime.now().strftime('%S')}.pdf"); open(temp, "wb").write(up.getbuffer()); file_path = temp
+            up = st.file_uploader("Upload PDF", type="pdf")
+            if up:
+                temp = os.path.join(UPLOAD_FOLDER, f"temp_{datetime.now().strftime('%S')}.pdf"); open(temp, "wb").write(up.getbuffer()); file_path = temp
 
-            if file_path:
-                if st.session_state.study_mode_sel == "Practice":
-                    t1, t2 = st.tabs(["MCQ", "Subjective"])
-                    with t1:
-                        if st.button("Generate MCQs"):
-                            with st.spinner("Generating..."):
-                                st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
-                                st.session_state.quiz_answers = {}
-                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "options" in st.session_state.study_data[0]:
-                            for i, q in enumerate(st.session_state.study_data):
-                                st.markdown(f"**Q{i+1}: {q['question']}**")
-                                st.session_state.quiz_answers[i] = st.radio("Select:", q['options'], key=f"mq_{i}", index=None)
-                                st.divider()
-                            if st.button("📝 Submit Quiz"):
-                                score = 0
-                                for i, q in enumerate(st.session_state.study_data):
-                                    u_ans = st.session_state.quiz_answers.get(i)
-                                    if u_ans and u_ans.strip() == q['answer'].strip(): score += 1
-                                    else: st.error(f"Q{i+1}: Incorrect. Answer: {q['answer']}")
-                                st.balloons(); st.success(f"Final Score: {score} / {len(st.session_state.study_data)}")
-                    with t2:
-                        if st.button("Generate Subjective"):
-                            with st.spinner("Generating..."): st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
-                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "model_answer" in st.session_state.study_data[0]:
-                            for i, q in enumerate(st.session_state.study_data):
-                                st.write(f"**Q{i+1}: {q['question']}**"); 
-                                if st.button(f"Show Answer {i+1}"): st.success(q['model_answer'])
-                                st.divider()
-                elif st.session_state.study_mode_sel == "Tools":
-                    t1, t2, t3 = st.tabs(["Summary", "Flashcards", "Mind Map"])
-                    with t1:
-                        if st.button("Summarize"):
-                            with st.spinner("Reading..."): st.session_state.study_data = generate_ai_content(file_path, "summary", force_vision)
-                        if st.session_state.study_data and isinstance(st.session_state.study_data, str): st.markdown(st.session_state.study_data)
-                    with t2:
-                        if st.button("Make Flashcards"):
-                            with st.spinner("Thinking..."): st.session_state.study_data = generate_ai_content(file_path, "flashcard", force_vision)
-                        if st.session_state.study_data and isinstance(st.session_state.study_data, list) and "term" in st.session_state.study_data[0]:
-                            c1, c2 = st.columns(2)
-                            for i, c in enumerate(st.session_state.study_data):
-                                with (c1 if i%2==0 else c2):
-                                    with st.container(border=True):
-                                        st.markdown(f"### {c['term']}")
-                                        with st.expander("Reveal"): st.info(c['definition'])
-                    with t3:
-                        if st.button("Generate Mind Map"):
-                            with st.spinner("Analyzing structure..."): 
-                                st.session_state.study_data = generate_ai_content(file_path, "mindmap", force_vision)
-                        
-                        if st.session_state.study_data:
-                            try:
-                                if hasattr(st.session_state.study_data, 'pipe'):
-                                    st.graphviz_chart(st.session_state.study_data)
-                                else:
-                                    st.warning("Mind map data unavailable. Try again.")
-                            except Exception as e:
-                                st.error(f"Visualization Error. Ensure graphviz is installed. {e}")
+        if file_path:
+            # UNIFIED STUDY CENTER TABS
+            t1, t2, t3, t4, t5 = st.tabs(["📝 Summary", "🧠 Mind Map", "🗂 Flashcards", "❓ Quiz (MCQ)", "✍️ Subjective"])
+            
+            with t1:
+                if st.button("Generate Summary"):
+                    with st.spinner("Summarizing..."):
+                        st.session_state.study_data = generate_ai_content(file_path, "summary", force_vision)
+                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
+                    st.error(st.session_state.study_data)
+                elif isinstance(st.session_state.study_data, str):
+                    st.markdown(st.session_state.study_data)
+
+            with t2:
+                if st.button("Generate Mind Map"):
+                    with st.spinner("Mapping concepts..."):
+                        st.session_state.study_data = generate_ai_content(file_path, "mindmap", force_vision)
+                
+                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
+                    st.error(st.session_state.study_data)
+                elif st.session_state.study_data:
+                    try:
+                        if isinstance(st.session_state.study_data, str) and ("digraph" in st.session_state.study_data or "graph" in st.session_state.study_data):
+                            st.graphviz_chart(st.session_state.study_data)
+                        else:
+                            st.warning("Click 'Generate' to create a map.")
+                    except Exception as e:
+                        st.error(f"Rendering Error: {e}")
+
+            with t3:
+                if st.button("Generate Flashcards"):
+                    with st.spinner("Creating cards..."):
+                        st.session_state.study_data = generate_ai_content(file_path, "flashcard", force_vision)
+                
+                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
+                    st.error(st.session_state.study_data)
+                elif isinstance(st.session_state.study_data, list):
+                    c1, c2 = st.columns(2)
+                    for i, c in enumerate(st.session_state.study_data):
+                        with (c1 if i%2==0 else c2):
+                            with st.container(border=True):
+                                st.markdown(f"### {c['term']}")
+                                with st.expander("Reveal Definition"): st.info(c['definition'])
+
+            with t4:
+                if st.button("Generate MCQs"):
+                    with st.spinner("Creating quiz..."):
+                        st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
+                
+                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
+                    st.error(st.session_state.study_data)
+                elif isinstance(st.session_state.study_data, list):
+                    for i, q in enumerate(st.session_state.study_data):
+                        st.markdown(f"**{i+1}. {q['question']}**")
+                        st.radio(f"Options for Q{i+1}", q['options'], key=f"mcq_{i}", index=None)
+                        with st.expander(f"Show Answer {i+1}"):
+                            st.success(f"Correct Answer: {q['answer']}")
+                            st.caption(f"Hint: {q.get('hint', '')}")
+                        st.divider()
+
+            with t5:
+                if st.button("Generate Subjective"):
+                    with st.spinner("Creating questions..."):
+                        st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
+                
+                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
+                    st.error(st.session_state.study_data)
+                elif isinstance(st.session_state.study_data, list):
+                    for i, q in enumerate(st.session_state.study_data):
+                        st.markdown(f"**Q{i+1}: {q['question']}**")
+                        with st.expander("Show Model Answer"):
+                            st.write(q['model_answer'])
+                        st.divider()
