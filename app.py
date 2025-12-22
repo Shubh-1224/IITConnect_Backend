@@ -623,7 +623,7 @@ def landing_page():
             st.subheader("Join the Community")
             u = st.text_input("Choose Username", key="r_user")
             p = st.text_input("Choose Password", type="password", key="r_pass")
-            c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "Other"])
+            c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "IIT Hyderabad", "IIT BHU", "IIT Indore", "IIT Gandhinagar", "IIT Mandi", "IIT Ropar" "Other"])
             if st.button("✨ Create Account", use_container_width=True):
                 if c and u and p:
                     if register_user(u, p, c): st.success("Account created! Go to Login.");
