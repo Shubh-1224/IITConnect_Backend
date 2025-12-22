@@ -623,7 +623,7 @@ def landing_page():
             st.subheader("Join the Community")
             u = st.text_input("Choose Username", key="r_user")
             p = st.text_input("Choose Password", type="password", key="r_pass")
-            c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "IIT Hyderabad", "IIT BHU", "IIT Indore", "IIT Gandhinagar", "IIT Mandi", "IIT Ropar" "Other"])
+            c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "IIT Hyderabad", "IIT BHU", "IIT Indore", "IIT Gandhinagar", "IIT Mandi", "IIT Ropar", "Other"])
             if st.button("✨ Create Account", use_container_width=True):
                 if c and u and p:
                     if register_user(u, p, c): st.success("Account created! Go to Login.");
@@ -680,7 +680,25 @@ else:
 
     # --- PAGES ---
     if menu == "Profile":
-        st.title("👤 My Profile")
+        # --- MODIFIED PROFILE HEADER ---
+        username = st.session_state.user
+        first_letter = username[0].upper() if username else "?"
+        
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 20px;">
+            <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #ff5722, #d62828); 
+                        border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                        font-size: 48px; font-weight: 800; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+                {first_letter}
+            </div>
+            <div>
+                <h1 style="margin: 0; font-size: 3.5rem; font-weight: 800; background: -webkit-linear-gradient(45deg, #eee, #999); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{username}</h1>
+                <p style="margin: 0; color: #888; font-size: 1.2rem;">{user_data['college'] if user_data else 'Student'}</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        # -------------------------------
+
         if user_data:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Reputation", user_data['reputation'])
