@@ -980,7 +980,13 @@ else:
         else:
             up = st.file_uploader("Upload PDF", type="pdf")
             if up:
-                temp = os.path.join(UPLOAD_FOLDER, f"temp_{datetime.now().strftime('%S')}.pdf"); open(temp, "wb").write(up.getbuffer()); file_path = temp
+                safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', up.name)
+                temp = os.path.join(UPLOAD_FOLDER, safe_name)
+                
+                with open(temp, "wb") as f: 
+                    f.write(up.getbuffer())
+                
+                file_path = temp
         
         # Reset results if file changes
         if 'current_file' not in st.session_state or st.session_state.current_file != file_path:
@@ -1085,4 +1091,3 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
-                # dhimant
