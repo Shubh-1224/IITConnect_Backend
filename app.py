@@ -32,75 +32,135 @@ DB_NAME = "iitconnect_v52.db"
 UPLOAD_FOLDER = "uploaded_notes"
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
-# --- 2. MODERN CSS STYLING ---
+# --- 2. ADVANCED INTERACTIVE CSS ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-
-    /* General Button Styling */
-    div.stButton > button {
-        width: 100%; border-radius: 12px; height: 3.2em;
-        background-color: #2b2d42; color: white; border: 1px solid #3d405b;
-        font-weight: 600; transition: all 0.3s ease;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    div.stButton > button:hover {
-        border-color: #ff5722; background-color: #3d405b;
-        transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    
+    /* GLOBAL THEME */
+    html, body, [class*="css"] { 
+        font-family: 'Inter', sans-serif; 
+        background-color: #0e1117;
     }
 
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] { background-color: #121212; border-right: 1px solid #333; }
-    section[data-testid="stSidebar"] div.stButton > button {
-        text-align: left; padding-left: 20px; border: none; background-color: transparent;
-    }
-    section[data-testid="stSidebar"] div.stButton > button:hover {
-        background-color: #333; color: #ff5722;
-    }
-
-    /* Tags */
-    .tag-pill {
-        display: inline-block; padding: 4px 10px; margin: 0 4px;
-        background-color: #2b2d42; border: 1px solid #ff5722;
-        border-radius: 12px; font-size: 12px; color: #fff; font-weight: 500;
-    }
-
-    /* --- LANDING PAGE SPECIFIC CSS --- */
-    .hero-title {
-        font-size: 4rem !important;
-        font-weight: 800 !important;
-        background: -webkit-linear-gradient(45deg, #ff5722, #da2eef);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0px;
-    }
-    .hero-sub {
-        font-size: 1.5rem;
-        color: #b0b0b0;
-        margin-bottom: 30px;
-    }
-    .feature-box {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 20px;
-        border-radius: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 10px;
-        transition: transform 0.3s;
-    }
-    .feature-box:hover {
-        transform: scale(1.02);
-        background: rgba(255, 255, 255, 0.08);
+    /* ANIMATIONS */
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
     }
     
-    /* Login Card */
-    .login-card {
-        background: #1e1e1e;
-        padding: 30px;
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        border: 1px solid #333;
+    .stApp {
+        animation: slideIn 0.4s ease-out;
     }
+
+    /* INTERACTIVE CARDS (Feed Items) */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #1c1c24;
+        border: 1px solid #2d2d3a;
+        border-radius: 16px;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        padding: 10px;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-4px) scale(1.005);
+        box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+        border-color: #7c3aed; /* Purple glow */
+    }
+
+    /* BUTTON STYLING - NEON & GLOW */
+    div.stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.2s;
+        border: 1px solid rgba(255,255,255,0.1);
+        background: linear-gradient(145deg, #25262b, #1e1e24);
+        color: #e0e0e0;
+    }
+    div.stButton > button:hover {
+        border-color: #7c3aed;
+        color: #fff;
+        background: linear-gradient(145deg, #7c3aed, #5b21b6);
+        box-shadow: 0 0 15px rgba(124, 58, 237, 0.4);
+        transform: translateY(-2px);
+    }
+    div.stButton > button:active {
+        transform: scale(0.98);
+    }
+
+    /* SIDEBAR NAVIGATION STYLE */
+    section[data-testid="stSidebar"] {
+        background-color: #0a0a0c;
+        border-right: 1px solid #1f1f2e;
+    }
+    section[data-testid="stSidebar"] div.stButton > button {
+        text-align: left;
+        padding-left: 20px;
+        background: transparent;
+        border: none;
+        color: #a1a1aa;
+        border-radius: 8px;
+        margin-bottom: 5px;
+    }
+    section[data-testid="stSidebar"] div.stButton > button:hover {
+        background: rgba(124, 58, 237, 0.1);
+        color: #d8b4fe;
+        border-left: 3px solid #7c3aed;
+        transform: translateX(5px);
+        box-shadow: none;
+    }
+
+    /* COURSE FOLDER GRID TILES */
+    .folder-tile div.stButton > button {
+        height: 140px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(135deg, #18181b 0%, #09090b 100%);
+        border: 1px solid #27272a;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .folder-tile div.stButton > button:hover {
+        background: linear-gradient(135deg, #2e1065 0%, #09090b 100%);
+        border-color: #8b5cf6;
+    }
+
+    /* INPUT FIELDS */
+    .stTextInput > div > div > input, .stTextArea > div > div > textarea {
+        background-color: #18181b;
+        color: white;
+        border: 1px solid #27272a;
+        border-radius: 8px;
+    }
+    .stTextInput > div > div > input:focus, .stTextArea > div > div > textarea:focus {
+        border-color: #7c3aed;
+        box-shadow: 0 0 0 1px #7c3aed;
+    }
+
+    /* TAGS */
+    .tag-pill {
+        background: rgba(124, 58, 237, 0.2);
+        color: #d8b4fe;
+        padding: 4px 12px;
+        border-radius: 100px;
+        font-size: 0.8rem;
+        border: 1px solid rgba(124, 58, 237, 0.3);
+        display: inline-block;
+        margin-right: 5px;
+    }
+
+    /* HEADINGS */
+    h1, h2, h3 {
+        color: white;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+    }
+    
+    /* CUSTOM SCROLLBAR */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #0e0e0e; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,7 +192,7 @@ def login_user(username, password):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, make_hash(password)))
     data = c.fetchone()
-    if data and data[14] == 0: c.execute("UPDATE users SET is_active = 1 WHERE username = ?", (username,)); conn.commit(); st.toast("Reactivated!")
+    if data and data[14] == 0: c.execute("UPDATE users SET is_active = 1 WHERE username = ?", (username,)); conn.commit(); st.toast("Welcome back! Account Reactivated 🚀")
     conn.close(); return data
 
 # --- STATS, BADGES & PROFILE ---
@@ -253,10 +313,12 @@ def toggle_bookmark(note_id):
     if c.fetchone():
         c.execute("DELETE FROM bookmarks WHERE user=? AND note_id=?", (st.session_state.user, note_id))
         msg = "Removed"
+        icon = "🗑️"
     else:
         c.execute("INSERT INTO bookmarks VALUES (?, ?, ?)", (st.session_state.user, note_id, datetime.now()))
         msg = "Saved"
-    conn.commit(); conn.close(); st.toast(f"Bookmark {msg}"); st.rerun()
+        icon = "💾"
+    conn.commit(); conn.close(); st.toast(f"{icon} Bookmark {msg}!"); st.rerun()
 
 def submit_course_request(user, course_name, reason):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
@@ -282,36 +344,62 @@ def delete_item(table, item_id):
     else: c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
     conn.commit(); conn.close(); 
     if user != "Anonymous": update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
-    st.toast(f"{table[:-1].title()} Deleted"); st.rerun()
+    st.toast(f"🗑️ {table[:-1].title()} Deleted"); st.rerun()
 
 def edit_item(table, item_id, new_text, column="content"):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id)); conn.commit(); conn.close(); st.toast("Updated"); st.rerun()
+    c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id)); conn.commit(); conn.close(); st.toast("✅ Updated successfully!"); st.rerun()
 
 def update_post(note_id, new_title, new_content):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    c.execute("UPDATE notes SET title=?, content=? WHERE id=?", (new_title, new_content, note_id)); conn.commit(); conn.close(); st.toast("Updated"); st.rerun()
+    c.execute("UPDATE notes SET title=?, content=? WHERE id=?", (new_title, new_content, note_id)); conn.commit(); conn.close(); st.toast("✅ Post Updated!"); st.rerun()
 
 def handle_vote(item_id, item_type, voter, direction):
-    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
     table = "notes" if item_type == "NOTE" else "answers"
-    c.execute(f"SELECT {'uploader' if item_type=='NOTE' else 'responder'} FROM {table} WHERE id = ?", (item_id,)); res = c.fetchone()
-    if not res: return
-    author = res[0]
+
+    # 1. CHECK EXISTING VOTE
     c.execute("SELECT vote_type FROM votes WHERE user=? AND item_id=? AND item_type=?", (voter, item_id, item_type))
-    existing = c.fetchone(); change = 0
+    existing = c.fetchone()
+    
+    change_for_author = 0 # To update the author's reputation later
+
+    # 2. UPDATE VOTES TABLE (Logic: New vs Toggle vs Switch)
     if not existing:
+        # Case A: New Vote
         c.execute("INSERT INTO votes VALUES (?, ?, ?, ?)", (voter, item_id, item_type, direction))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (direction, item_id)); change = direction
+        change_for_author = direction
     elif existing[0] == direction:
+        # Case B: Toggle Off (e.g., Click Up again -> Remove Upvote)
         c.execute("DELETE FROM votes WHERE user=? AND item_id=? AND item_type=?", (voter, item_id, item_type))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes - ? WHERE id = ?", (direction, item_id)); change = -direction
+        change_for_author = -direction
     else:
+        # Case C: Switch (e.g., Change Up to Down)
         c.execute("UPDATE votes SET vote_type=? WHERE user=? AND item_id=? AND item_type=?", (direction, voter, item_id, item_type))
-        c.execute(f"UPDATE {table} SET upvotes = upvotes + ? WHERE id = ?", (2*direction, item_id)); change = 2*direction
-    if author != "Anonymous": c.execute("UPDATE users SET upvotes_received = upvotes_received + ? WHERE username = ?", (change, author))
-    conn.commit(); conn.close(); 
-    if author != "Anonymous": update_reputation(author)
+        change_for_author = 2 * direction
+
+    # 3. CRITICAL FIX: RECALCULATE TOTAL
+    # Instead of doing "upvotes + 1", we count the actual rows. This fixes your "-2" glitch.
+    c.execute("SELECT COALESCE(SUM(vote_type), 0) FROM votes WHERE item_id=? AND item_type=?", (item_id, item_type))
+    real_total = c.fetchone()[0]
+    
+    # Update the note with the real count
+    c.execute(f"UPDATE {table} SET upvotes = ? WHERE id = ?", (real_total, item_id))
+
+    # 4. UPDATE AUTHOR STATS
+    c.execute(f"SELECT {'uploader' if item_type=='NOTE' else 'responder'} FROM {table} WHERE id = ?", (item_id,))
+    author_res = c.fetchone()
+    
+    if author_res:
+        author = author_res[0]
+        if author != "Anonymous":
+            c.execute("UPDATE users SET upvotes_received = upvotes_received + ? WHERE username = ?", (change_for_author, author))
+            conn.commit() # Save changes before updating reputation
+            update_reputation(author)
+    
+    conn.commit()
+    conn.close()
 
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
@@ -367,7 +455,7 @@ def get_ai_response(prompt, file_path=None):
     max_retries = 3
     base_delay = 10
     
-    time.sleep(2) # Prevent burst clicks
+    time.sleep(1) # Prevent burst clicks
 
     for attempt in range(max_retries):
         try:
@@ -493,6 +581,7 @@ def render_feed_item(note):
         else:
             col_vote, col_body = st.columns([1, 10])
             with col_vote:
+                # st.markdown(f"<h3 style='text-align:center; margin:0;'>{note['upvotes']}</h3>", unsafe_allow_html=True)
                 st.metric("Votes", note['upvotes'])
                 if st.button("⬆️", key=f"u_{note['id']}"): handle_vote(note['id'], "NOTE", st.session_state.user, 1); st.rerun()
                 if st.button("⬇️", key=f"d_{note['id']}"): handle_vote(note['id'], "NOTE", st.session_state.user, -1); st.rerun()
@@ -502,7 +591,7 @@ def render_feed_item(note):
             with c_meta:
                 c_bm, c_opt = st.columns(2)
                 with c_bm:
-                    if st.button("🔖", key=f"bm_{note['id']}", help="Save"): toggle_bookmark(note['id'])
+                    if st.button("🔖", key=f"bm_{note['id']}", help="Save to Bookmarks"): toggle_bookmark(note['id'])
                 with c_opt:
                     if note['uploader'] == st.session_state.user:
                         with st.popover("⋮"):
@@ -518,7 +607,7 @@ def render_feed_item(note):
                             with st.expander("📤 Share"):
                                 st.write("Copy Link:"); st.code(f"https://iitconnect.app/post/{note['id']}")
                                 c1, c2 = st.columns(2)
-                                c1.button("📱 Whatsapp"); c2.button("🐦 Twitter")
+                                c1.button("Whatsapp"); c2.button("Twitter")
                             with st.expander("🚩 Report"):
                                 reason = st.selectbox("Reason", ["Spam", "Harassment", "Hate Speech", "False Info", "Other"], key=f"rr_{note['id']}")
                                 det = st.text_area("Details", key=f"rd_{note['id']}")
@@ -553,7 +642,7 @@ def render_feed_item(note):
                             with st.expander("📄 View PDF"): pdf_viewer(fpath, height=400)
                         elif ext in ['png','jpg','jpeg']: st.image(fpath, width=400)
                     with c2:
-                        with open(fpath, "rb") as f: st.download_button("⬇️ Download", f, file_name=note['filename'])
+                        with open(fpath, "rb") as f: st.download_button("⬇️ Download File", f, file_name=note['filename'])
             st.divider()
             
             if note['post_type'] == "DOUBT":
@@ -575,7 +664,7 @@ def render_feed_item(note):
                                  with st.expander("🗑️ Delete"):
                                      st.warning("Delete this answer?")
                                      if st.button("Confirm", key=f"da_{a['id']}"): delete_item("answers", a['id'])
-                        with st.expander("Comments"):
+                        with st.expander("💬 Comments"):
                             render_comments(a['id'], "ANSWER")
                             with st.form(f"cform_ans_{a['id']}"):
                                 c_txt = st.text_input("Comment...", key=f"aci_{a['id']}")
@@ -607,7 +696,7 @@ def landing_page():
     col_hero, col_login = st.columns([1.5, 1], gap="large")
 
     with col_hero:
-        st.markdown('<p class="hero-title">IITConnect</p>', unsafe_allow_html=True)
+        st.markdown('<h1 style="font-size: 4rem; background: linear-gradient(45deg, #7c3aed, #d946ef); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">IITConnect</h1>', unsafe_allow_html=True)
         st.markdown('<p class="hero-sub">The ultimate academic social network for IITians. Share notes, clear doubts, and grow together.</p>', unsafe_allow_html=True)
         
         # Live Stats Row
@@ -618,22 +707,22 @@ def landing_page():
 
         st.markdown("### 🚀 Why Join?")
         st.markdown("""
-        <div class="feature-box">
+        <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
             <h4>📚 Crowd-Sourced Notes</h4>
             <p>Access high-quality handwritten notes, slides, and papers shared by toppers from across all IITs.</p>
         </div>
-        <div class="feature-box">
+        <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
             <h4>🤖 AI Study Assistant</h4>
             <p>Stuck on a concept? Our Gemini-powered AI tutor creates quizzes, flashcards, and explains doubts instantly.</p>
         </div>
-        <div class="feature-box">
+        <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; margin-bottom: 10px;">
             <h4>🏆 Reputation System</h4>
             <p>Earn badges like 'Scholar' or 'Professor' by helping others. Build your academic profile.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col_login:
-        st.markdown('<div class="login-card">', unsafe_allow_html=True)
+        st.markdown('<div class="login-card" style="background: #18181b; padding: 30px; border-radius: 16px; border: 1px solid #333;">', unsafe_allow_html=True)
         action = st.radio("Choose Action", ["🔐 Login", "📝 Register"], horizontal=True, label_visibility="collapsed")
         
         if action == "🔐 Login":
@@ -708,13 +797,13 @@ else:
         
         st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 20px;">
-            <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #ff5722, #d62828); 
+            <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #7c3aed, #db2777); 
                         border-radius: 50%; display: flex; align-items: center; justify-content: center; 
                         font-size: 48px; font-weight: 800; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
                 {first_letter}
             </div>
             <div>
-                <h1 style="margin: 0; font-size: 3.5rem; font-weight: 800; background: -webkit-linear-gradient(45deg, #eee, #999); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{username}</h1>
+                <h1 style="margin: 0; font-size: 3.5rem; font-weight: 800; background: linear-gradient(45deg, #fff, #999); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{username}</h1>
                 <p style="margin: 0; color: #888; font-size: 1.2rem;">{user_data['college'] if user_data else 'Student'}</p>
             </div>
         </div>
@@ -766,7 +855,7 @@ else:
                 bookmarks = get_data("SELECT * FROM notes WHERE id IN (SELECT note_id FROM bookmarks WHERE user=?)", (st.session_state.user,))
                 if bookmarks:
                     for b in bookmarks: render_feed_item(b)
-                else: st.info("No saved items yet.")
+                else: st.info("No saved items yet. Bookmark posts from the feed!")
 
     elif menu == "Profile_View":
         target_user = st.session_state.view_user
@@ -814,7 +903,7 @@ else:
             with st.popover(icon):
                 st.write("### Notifications")
                 if notifs:
-                    if st.button("Mark Read", key="mark_read_feed"): 
+                    if st.button("Mark All Read", key="mark_read_feed"): 
                         mark_notifications_read(st.session_state.user)
                         st.rerun()
                     for n in notifs: st.info(f"{n[2]} ({n[4]})")
@@ -826,10 +915,10 @@ else:
         top_tags = [t[0] for t in Counter(all_tags).most_common(5)]
         st.write("Trending Topics:")
         cols = st.columns(len(top_tags) + 1)
-        if cols[0].button("All"): st.session_state.tag_filter = None
+        if cols[0].button("All Topics"): st.session_state.tag_filter = None
         for i, tag in enumerate(top_tags):
             if cols[i+1].button(f"#{tag}"): st.session_state.tag_filter = tag
-        q = st.text_input("🔍 Search...", placeholder="Tag, Title...")
+        q = st.text_input("🔍 Search...", placeholder="Type to search notes, doubts, or tags...")
         query = "SELECT * FROM notes"
         params = []
         if q:
@@ -840,29 +929,21 @@ else:
             params = [f"%{st.session_state.tag_filter}%"]
         query += " ORDER BY timestamp DESC"
         notes = get_data(query, params)
+        if not notes:
+            st.markdown("""<div style='text-align:center; padding: 40px; color: #666;'>
+                <h2>📭 Nothing here yet!</h2>
+                <p>Be the first to contribute or try a different search.</p>
+            </div>""", unsafe_allow_html=True)
         for n in notes: render_feed_item(n)
 
     elif menu == "Folders":
         st.title("📂 Course Folders")
-        # PAGE SPECIFIC SQUARE CSS INJECTION (FORCE HEIGHT)
+        # PAGE SPECIFIC GRID CSS INJECTION
         st.markdown("""
         <style>
-        div[data-testid="column"] div.stButton > button {
-            height: 12rem !important;
-            width: 100% !important;
-            padding: 2rem !important;
-            font-size: 1.5rem !important;
-            white-space: normal !important;
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            background: linear-gradient(145deg, #1e1e1e, #292929) !important;
-            border: 1px solid #444 !important;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
-        }
-        div[data-testid="column"] div.stButton > button p {
-            font-size: 1.5rem !important;
+        .stButton button {
+            width: 100%;
+            height: 100%;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -883,12 +964,18 @@ else:
         
         if 'folder' not in st.session_state: st.session_state.folder = None
         if not st.session_state.folder:
-            cols = st.columns(3)
+            # CHANGED: 2x2 Grid for Folders
+            cols = st.columns(2)
             for i, course in enumerate(filtered_courses):
-                with cols[i % 3]:
-                    if st.button(f"📁\n{course}", key=f"fld_{course}", use_container_width=True):
-                        st.session_state.folder = course
-                        st.rerun()
+                with cols[i % 2]:
+                    # Using a container with border for card effect
+                    with st.container(border=True):
+                        st.subheader(f"📁 {course}")
+                        st.caption("Access Notes & Doubts")
+                        if st.button(f"Open Folder", key=f"fld_{course}", use_container_width=True):
+                            st.session_state.folder = course
+                            st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
         else:
             if st.button("⬅ Back to Courses"): st.session_state.folder = None; st.rerun()
             st.subheader(f"📂 {st.session_state.folder}")
@@ -912,7 +999,6 @@ else:
                 if st.form_submit_button("Upload"):
                     if ti and f:
                         p = os.path.join(UPLOAD_FOLDER, f.name); open(p, "wb").write(f.getbuffer())
-                        # REMOVED AI BLOCKING: NOW IT JUST POSTS
                         add_note(st.session_state.user, sub, ti, f.name, tags, True); st.success("Posted!")
                     else: st.error("Title and File are required.")
         with t2:
@@ -943,7 +1029,7 @@ else:
                         conn.close()
                         
                         if new_id_data:
-                            with st.spinner("🤖 AI is writing an answer..."):
+                            with st.spinner("🤖 AI is thinking..."):
                                 prompt = f"Answer this academic doubt clearly: {ti}\nDetails: {txt}"
                                 ai_reply = get_ai_response(prompt, file_path=fpath)
                                 if ai_reply and not ai_reply.startswith("Error"):
@@ -1091,3 +1177,4 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
+                # dhimant
