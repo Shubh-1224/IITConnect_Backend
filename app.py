@@ -25,6 +25,7 @@ except FileNotFoundError:
     st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # CONSTANTS
 DB_NAME = "iitconnect_v52.db"
@@ -357,13 +358,17 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (FORCED GEMINI 2.5 WITH RETRY LOGIC) ---
+# --- 6. AI LOGIC (ROBUST RETRY + CORRECTED MODEL) ---
 def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    model_name = "gemini-2.5-flash"
-    max_retries = 3  # How many times to retry
+    # FIXED: Changed from non-existent 2.5-flash to 1.5-flash
+    model_name = "gemini-2.5-flash-lite"
+    max_retries = 3
+    base_delay = 10
     
+    time.sleep(2) # Prevent burst clicks
+
     for attempt in range(max_retries):
         try:
             model = genai.GenerativeModel(model_name)
@@ -374,15 +379,16 @@ def get_ai_response(prompt, file_path=None):
                         mime_type = 'image/jpeg'
                         
                     uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                    
-                    # Wait for processing loop
+                    wait_count = 0
                     while uploaded.state.name == "PROCESSING": 
                         time.sleep(1)
                         uploaded = genai.get_file(uploaded.name)
+                        wait_count += 1
+                        if wait_count > 30: break 
                     
                     response = model.generate_content([uploaded, prompt])
                 except Exception as inner_e:
-                    # Fallback: Extract text manually if visual upload fails
+                    # Fallback text extraction if vision upload/processing fails
                     if file_path.lower().endswith('.pdf'):
                         text = get_pdf_text(file_path)
                         if not text: raise ValueError("Empty PDF text")
@@ -396,16 +402,16 @@ def get_ai_response(prompt, file_path=None):
 
         except Exception as e:
             error_msg = str(e)
-            # Check for Rate Limit (429) or Overloaded (503) errors
-            if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg:
+            # Handle Quota/Rate Limits (429) or Server Overload (503)
+            if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg or "resource" in error_msg.lower():
                 if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 5  # Wait 5s, then 10s, then 15s
+                    wait_time = base_delay * (attempt + 1)
+                    st.toast(f"⏳ High Traffic: Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
                     time.sleep(wait_time)
                     continue
                 else:
-                    return "⚠️ High Traffic: The free AI quota is currently full. Please wait 1 minute and try again."
+                    return "⚠️ System Busy: The AI quota is currently full. Please wait 1-2 minutes and try again."
             
-            # If it's a different error, fail immediately
             return f"AI Failed. Error: {error_msg}"
 
 def extract_json_from_text(text):
@@ -442,7 +448,7 @@ def generate_ai_content(file_path, task_type, force_vision=False):
     else:
         raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:12000]}")
     
-    if raw_text and raw_text.startswith("AI Failed"): return raw_text 
+    if raw_text and (raw_text.startswith("AI Failed") or raw_text.startswith("⚠️ System Busy")): return raw_text 
 
     if task_type == 'summary': return raw_text
     if task_type == 'mindmap': return extract_dot_from_text(raw_text)
@@ -450,7 +456,6 @@ def generate_ai_content(file_path, task_type, force_vision=False):
     return extract_json_from_text(raw_text)
 
 def verify_content_with_ai(text, subject):
-    # Pass-through for images or empty text (Fail Open)
     if not text or len(text.strip()) < 50: return True, "Scanned (Image/Short)"
     return True, "Allowed"
 
@@ -653,12 +658,10 @@ def landing_page():
 # --- INITIALIZATION ---
 init_db()
 if 'user' not in st.session_state: st.session_state.user = None
-if 'err' not in st.session_state: st.session_state.err = None
 if 'nav' not in st.session_state: st.session_state.nav = "Feed"
 if 'view_user' not in st.session_state: st.session_state.view_user = None
 if 'course_tab' not in st.session_state: st.session_state.course_tab = "Notes"
-if 'chat_history' not in st.session_state: st.session_state.chat_history = []
-if 'study_data' not in st.session_state: st.session_state.study_data = None
+if 'ai_outputs' not in st.session_state: st.session_state.ai_outputs = {} # DICTIONARY FOR OUTPUTS
 
 # --- MAIN NAVIGATION CONTROLLER ---
 if not st.session_state.user:
@@ -961,7 +964,7 @@ else:
         st.title("⚡ AI Study Center")
         if st.button("⬅ Back to Menu"): 
             st.session_state.study_mode_sel = None; 
-            st.session_state.study_data = None
+            st.session_state.ai_outputs = {} # Clear on exit
             st.rerun()
         st.divider()
         
@@ -978,96 +981,108 @@ else:
             up = st.file_uploader("Upload PDF", type="pdf")
             if up:
                 temp = os.path.join(UPLOAD_FOLDER, f"temp_{datetime.now().strftime('%S')}.pdf"); open(temp, "wb").write(up.getbuffer()); file_path = temp
+        
+        # Reset results if file changes
+        if 'current_file' not in st.session_state or st.session_state.current_file != file_path:
+            st.session_state.current_file = file_path
+            st.session_state.ai_outputs = {}
 
         if file_path:
             # UNIFIED STUDY CENTER TABS
             t1, t2, t3, t4, t5 = st.tabs(["📝 Summary", "🧠 Mind Map", "🗂 Flashcards", "❓ Quiz (MCQ)", "✍️ Subjective"])
             
             with t1:
-                if st.button("Generate Summary"):
-                    with st.spinner("Summarizing..."):
-                        st.session_state.study_data = generate_ai_content(file_path, "summary", force_vision)
-                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
-                    st.error(st.session_state.study_data)
-                elif isinstance(st.session_state.study_data, str):
-                    st.markdown(st.session_state.study_data)
+                data = st.session_state.ai_outputs.get('summary')
+                if not data:
+                    if st.button("Generate Summary"):
+                        with st.spinner("Summarizing..."):
+                            st.session_state.ai_outputs['summary'] = generate_ai_content(file_path, "summary", force_vision)
+                            st.rerun()
+                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                    st.error(data)
+                    if st.button("Regenerate Summary"): del st.session_state.ai_outputs['summary']; st.rerun()
+                else:
+                    st.markdown(data)
+                    if st.button("Regenerate Summary"): del st.session_state.ai_outputs['summary']; st.rerun()
 
             with t2:
-                if st.button("Generate Mind Map"):
-                    with st.spinner("Mapping concepts..."):
-                        st.session_state.study_data = generate_ai_content(file_path, "mindmap", force_vision)
-                
-                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
-                    st.error(st.session_state.study_data)
-                elif st.session_state.study_data:
-                    try:
-                        source = st.session_state.study_data
-                        if isinstance(source, str) and ("digraph" in source or "graph" in source):
-                            # --- FIX: Inject styling for better visibility ---
-                            # 1. Force Left-to-Right layout (taller, not wider)
-                            # 2. Increase font size and box styling
-                            if "rankdir" not in source:
-                                source = source.replace("{", '{\n  graph [rankdir=LR, splines=ortho];\n  node [shape=box, style="filled,rounded", fillcolor="#f0f2f6", fontname="Arial", fontsize=12];\n  edge [penwidth=1.2];\n', 1)
-                            
-                            st.graphviz_chart(source, use_container_width=True)
-                        else:
-                            st.info("⚠️ Please click 'Generate Mind Map' to view.")
-                    except Exception as e:
-                        st.error(f"Rendering Error: {e}")
+                data = st.session_state.ai_outputs.get('mindmap')
+                if not data:
+                    if st.button("Generate Mind Map"):
+                        with st.spinner("Mapping concepts..."):
+                            st.session_state.ai_outputs['mindmap'] = generate_ai_content(file_path, "mindmap", force_vision)
+                            st.rerun()
+                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                     st.error(data)
+                     if st.button("Regenerate Mind Map"): del st.session_state.ai_outputs['mindmap']; st.rerun()
+                else:
+                    if isinstance(data, str) and ("digraph" in data or "graph" in data):
+                        if "rankdir" not in data:
+                            data = data.replace("{", '{\n  graph [rankdir=LR, splines=ortho];\n  node [shape=box, style="filled,rounded", fillcolor="#f0f2f6", fontname="Arial", fontsize=12];\n  edge [penwidth=1.2];\n', 1)
+                        st.graphviz_chart(data, use_container_width=True)
+                    else: st.error(f"Invalid Data: {data}")
+                    if st.button("Regenerate Mind Map"): del st.session_state.ai_outputs['mindmap']; st.rerun()
 
             with t3:
-                if st.button("Generate Flashcards"):
-                    with st.spinner("Creating cards..."):
-                        st.session_state.study_data = generate_ai_content(file_path, "flashcard", force_vision)
-                
-                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
-                    st.error(st.session_state.study_data)
-                elif isinstance(st.session_state.study_data, list):
-                    if len(st.session_state.study_data) > 0 and 'term' not in st.session_state.study_data[0]:
-                        st.info("⚠️ Current data is not in Flashcard format. Please click 'Generate Flashcards'.")
-                    else:
-                        c1, c2 = st.columns(2)
-                        for i, c in enumerate(st.session_state.study_data):
-                            with (c1 if i%2==0 else c2):
-                                with st.container(border=True):
-                                    term = c.get('term', 'Unknown Term')
-                                    definition = c.get('definition', 'No definition found')
-                                    st.markdown(f"### {term}")
-                                    with st.expander("Reveal Definition"): st.info(definition)
+                data = st.session_state.ai_outputs.get('flashcard')
+                if not data:
+                    if st.button("Generate Flashcards"):
+                        with st.spinner("Creating cards..."):
+                            st.session_state.ai_outputs['flashcard'] = generate_ai_content(file_path, "flashcard", force_vision)
+                            st.rerun()
+                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                     st.error(data)
+                     if st.button("Regenerate Flashcards"): del st.session_state.ai_outputs['flashcard']; st.rerun()
+                elif isinstance(data, list):
+                    c1, c2 = st.columns(2)
+                    for i, c in enumerate(data):
+                        with (c1 if i%2==0 else c2):
+                            with st.container(border=True):
+                                # Fix for KeyError: Use .get()
+                                term = c.get('term', 'Unknown')
+                                definition = c.get('definition', '...')
+                                st.markdown(f"### {term}")
+                                with st.expander("Reveal Definition"): st.info(definition)
+                    if st.button("Regenerate Flashcards"): del st.session_state.ai_outputs['flashcard']; st.rerun()
+                else: st.error(data)
 
             with t4:
-                if st.button("Generate MCQs"):
-                    with st.spinner("Creating quiz..."):
-                        st.session_state.study_data = generate_ai_content(file_path, "mcq", force_vision)
-                
-                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
-                    st.error(st.session_state.study_data)
-                elif isinstance(st.session_state.study_data, list):
-                    if len(st.session_state.study_data) > 0 and 'options' not in st.session_state.study_data[0]:
-                        st.info("⚠️ Current data is not in Quiz format. Please click 'Generate MCQs'.")
-                    else:
-                        for i, q in enumerate(st.session_state.study_data):
-                            st.markdown(f"**{i+1}. {q['question']}**")
-                            st.radio(f"Options for Q{i+1}", q['options'], key=f"mcq_{i}", index=None)
-                            with st.expander(f"Show Answer {i+1}"):
-                                st.success(f"Correct Answer: {q['answer']}")
-                                st.caption(f"Hint: {q.get('hint', '')}")
-                            st.divider()
+                data = st.session_state.ai_outputs.get('mcq')
+                if not data:
+                    if st.button("Generate MCQs"):
+                        with st.spinner("Creating quiz..."):
+                            st.session_state.ai_outputs['mcq'] = generate_ai_content(file_path, "mcq", force_vision)
+                            st.rerun()
+                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                     st.error(data)
+                     if st.button("Regenerate MCQs"): del st.session_state.ai_outputs['mcq']; st.rerun()
+                elif isinstance(data, list):
+                    for i, q in enumerate(data):
+                        st.markdown(f"**{i+1}. {q.get('question','?')}**")
+                        st.radio(f"Options for Q{i+1}", q.get('options',[]), key=f"mcq_{i}", index=None)
+                        with st.expander(f"Show Answer {i+1}"):
+                            st.success(f"Correct Answer: {q.get('answer','')}")
+                            st.caption(f"Hint: {q.get('hint', '')}")
+                        st.divider()
+                    if st.button("Regenerate MCQs"): del st.session_state.ai_outputs['mcq']; st.rerun()
+                else: st.error(data)
 
             with t5:
-                if st.button("Generate Subjective"):
-                    with st.spinner("Creating questions..."):
-                        st.session_state.study_data = generate_ai_content(file_path, "subjective", force_vision)
-                
-                if isinstance(st.session_state.study_data, str) and "AI Failed" in st.session_state.study_data:
-                    st.error(st.session_state.study_data)
-                elif isinstance(st.session_state.study_data, list):
-                    if len(st.session_state.study_data) > 0 and 'model_answer' not in st.session_state.study_data[0]:
-                        st.info("⚠️ Current data is not in Subjective format. Please click 'Generate Subjective'.")
-                    else:
-                        for i, q in enumerate(st.session_state.study_data):
-                            st.markdown(f"**Q{i+1}: {q['question']}**")
-                            with st.expander("Show Model Answer"):
-                                st.write(q['model_answer'])
-                            st.divider()
-                            # dhimant
+                data = st.session_state.ai_outputs.get('subjective')
+                if not data:
+                    if st.button("Generate Subjective"):
+                        with st.spinner("Creating questions..."):
+                            st.session_state.ai_outputs['subjective'] = generate_ai_content(file_path, "subjective", force_vision)
+                            st.rerun()
+                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                     st.error(data)
+                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
+                elif isinstance(data, list):
+                    for i, q in enumerate(data):
+                        st.markdown(f"**Q{i+1}: {q.get('question','?')}**")
+                        with st.expander("Show Model Answer"):
+                            st.write(q.get('model_answer','...'))
+                        st.divider()
+                    if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
+                else: st.error(data)
+                # dhimant
