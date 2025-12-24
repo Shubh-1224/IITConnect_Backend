@@ -449,82 +449,64 @@ def get_pdf_text(pdf_path):
     return text
 
 # --- 6. AI LOGIC (ROBUST RETRY + CORRECTED MODEL) ---
+# REPLACE YOUR CURRENT get_ai_response FUNCTION WITH THIS:
+
 def get_ai_response(prompt, file_path=None):
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
+    # 1. Check API Key
+    if not GOOGLE_API_KEY:
+        return "Error: API Key is missing."
     
-    # FIXED: Changed to a valid model name
+    # 2. Use the standard model
     model_name = "gemini-1.5-flash"
-    max_retries = 3
-    base_delay = 5
     
-    time.sleep(2) # Prevent burst clicks
-
-    for attempt in range(max_retries):
-        try:
-            model = genai.GenerativeModel(model_name)
-            if file_path:
-                try:
-                    mime_type = 'application/pdf'
-                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        mime_type = 'image/jpeg'
-                        
-                    uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                    wait_count = 0
-                    while uploaded.state.name == "PROCESSING": 
-                        time.sleep(1)
-                        uploaded = genai.get_file(uploaded.name)
-                        wait_count += 1
-                        if wait_count > 30: break 
+    try:
+        model = genai.GenerativeModel(model_name)
+        
+        if file_path:
+            # Handle File Upload
+            try:
+                mime_type = 'application/pdf'
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg'
                     
-                    response = model.generate_content([uploaded, prompt])
-                except Exception as inner_e:
-                    # Fallback text extraction if vision upload/processing fails
-                    if file_path.lower().endswith('.pdf'):
-                        text = get_pdf_text(file_path)
-                        if not text: raise ValueError("Empty PDF text")
-                        # Truncate text to stay within token limits
-                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:30000]}")
-                    else: 
-                        raise inner_e
-            else:
-                response = model.generate_content(prompt)
-            
-            return response.text
+                print(f"DEBUG: Uploading file {file_path}...")
+                uploaded = genai.upload_file(file_path, mime_type=mime_type)
+                
+                # Wait for processing
+                wait_count = 0
+                while uploaded.state.name == "PROCESSING": 
+                    time.sleep(1)
+                    uploaded = genai.get_file(uploaded.name)
+                    wait_count += 1
+                    if wait_count > 30: 
+                        return "Error: File processing timed out."
+                
+                if uploaded.state.name == "FAILED":
+                    return "Error: Google failed to process the PDF."
 
-        except Exception as e:
-            error_msg = str(e)
-            print(f"DEBUG: Attempt {attempt+1} failed: {error_msg}")
-            
-            # Handle Quota/Rate Limits or "Model Not Found" issues
-            if any(x in error_msg.lower() for x in ["429", "quota", "503", "resource", "404", "not found"]):
-                if attempt < max_retries - 1:
-                    wait_time = base_delay * (2 ** attempt) # Exponential backoff
-                    print(f"Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                # REPLACE WITH THIS:
+                print("DEBUG: Generating content with file...")
+                response = model.generate_content([uploaded, prompt])
+                
+            except Exception as inner_e:
+                # Fallback to text extraction if vision fails
+                print(f"DEBUG: Vision failed ({str(inner_e)}), trying text extraction...")
+                if file_path.lower().endswith('.pdf'):
+                    text = get_pdf_text(file_path)
+                    if not text: return "Error: Could not extract text from PDF."
+                    # Truncate to avoid token limits
+                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:30000]}")
                 else:
-                    # RETURN THE REAL ERROR SO WE CAN SEE IT
-                    return f"⚠️ ERROR DETAILS: {error_msg}" 
-            
-            return f"AI Failed. Error: {error_msg}"
-def extract_json_from_text(text):
-    if not text: return None
-    try:
-        match = re.search(r'(\[.*\]|\{.*\})', text, re.DOTALL)
-        if match: return json.loads(match.group(1))
-    except: pass
-    return None
+                    return f"Error processing image: {str(inner_e)}"
+        else:
+            # Simple text generation
+            print("DEBUG: Generating content (text only)...")
+            response = model.generate_content(prompt)
+        
+        return response.text
 
-def extract_dot_from_text(text):
-    if not text: return None
-    try:
-        match = re.search(r'(digraph\s+.*\}|graph\s+.*\})', text, re.DOTALL)
-        if match: return match.group(1)
-        if "digraph" in text: return text
-    except: pass
-    return None
-
+    except Exception as e:
+        # ⚠️ THIS WILL SHOW US THE REAL ERROR
+        return f"🚨 CRITICAL ERROR: {str(e)}"
 @st.cache_data(show_spinner=False) 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
