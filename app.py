@@ -1177,4 +1177,13 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
-                # dhimant
+st.write("---") # Optional: Adds a horizontal line separator
+
+# Create 2 columns for side-by-side layout
+col1, col2 = st.columns([1, 1]) # You can adjust width ratios if needed
+
+with col1:
+    st.button("Powered by Gemini", disabled=True, key="btn_gemini")
+
+with col2:
+    st.button("Powered by Google AI Studio", disabled=True, key="btn_studio")
