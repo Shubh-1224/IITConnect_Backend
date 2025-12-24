@@ -11,7 +11,9 @@ from collections import Counter
 from datetime import datetime
 from pypdf import PdfReader
 from streamlit_pdf_viewer import pdf_viewer
-import google.generativeai as genai
+# NEW SDK IMPORT
+from google import genai
+from google.genai import types
 import graphviz
 
 # --- 1. SETUP & CONFIGURATION ---
@@ -24,10 +26,8 @@ except FileNotFoundError:
     st.warning("⚠️ Secrets file not found. Please create .streamlit/secrets.toml")
     st.stop()
 
-genai.configure(api_key=GOOGLE_API_KEY)
-
-# FIXED: Use a valid model name (1.5-flash is stable and fast)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# NEW CLIENT SETUP
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
 DB_NAME = "iitconnect_v52.db"
@@ -403,6 +403,7 @@ def handle_vote(item_id, item_type, voter, direction):
     conn.commit()
     conn.close()
 
+# --- FIXED ADD_NOTE TO PREVENT DATABASE LOCKS ---
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
     # 1. Open connection for the NOTE
     conn = sqlite3.connect(DB_NAME)
@@ -422,19 +423,23 @@ def add_note(uploader, subject, title, filename, tags, verified, content="", pos
         conn.commit()
     except Exception as e:
         st.error(f"Database error: {e}")
+        return # Stop if note failed
     finally:
         conn.close()
 
     # 3. Handle Notifications & Reputation (New Connections)
     # These functions open their own connections, so they must run AFTER the main conn is closed
     if uploader != "Anonymous":
-        # get_followers_list opens a read connection
-        followers = get_followers_list(uploader)
-        for f in followers:
-            # add_notification opens a write connection (would fail if note conn was open)
-            add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
-        
-        update_reputation(uploader)
+        try:
+            # get_followers_list opens a read connection
+            followers = get_followers_list(uploader)
+            for f in followers:
+                # add_notification opens a write connection (would fail if note conn was open)
+                add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
+            
+            update_reputation(uploader)
+        except Exception as e:
+            print(f"Notification error: {e}") # Non-critical, just log it
 
 def add_answer(doubt_id, user, text, original_uploader):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
@@ -470,65 +475,67 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (ROBUST RETRY + CORRECTED MODEL) ---
-# REPLACE YOUR CURRENT get_ai_response FUNCTION WITH THIS:
-
+# --- 6. AI LOGIC (UPDATED FOR NEW SDK + GEMINI 2.0) ---
 def get_ai_response(prompt, file_path=None):
-    # 1. Check API Key
     if not GOOGLE_API_KEY:
-        return "Error: API Key is missing."
+        return "Error: API Key missing. Please config."
     
-    # 2. Use the standard model
-    model_name = "gemini-1.5-flash"
+    # 🌟 USE THE NEW, FAST MODEL
+    model_name = "gemini-2.0-flash" 
     
     try:
-        model = genai.GenerativeModel(model_name)
-        
         if file_path:
-            # Handle File Upload
-            try:
-                mime_type = 'application/pdf'
-                if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    mime_type = 'image/jpeg'
-                    
-                print(f"DEBUG: Uploading file {file_path}...")
-                uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                
-                # Wait for processing
-                wait_count = 0
-                while uploaded.state.name == "PROCESSING": 
-                    time.sleep(1)
-                    uploaded = genai.get_file(uploaded.name)
-                    wait_count += 1
-                    if wait_count > 30: 
-                        return "Error: File processing timed out."
-                
-                if uploaded.state.name == "FAILED":
-                    return "Error: Google failed to process the PDF."
-
-                print("DEBUG: Generating content with file...")
-                response = model.generate_content([uploaded, prompt])
-                
-            except Exception as inner_e:
-                # Fallback to text extraction if vision fails
-                print(f"DEBUG: Vision failed ({str(inner_e)}), trying text extraction...")
-                if file_path.lower().endswith('.pdf'):
-                    text = get_pdf_text(file_path)
-                    if not text: return "Error: Could not extract text from PDF."
-                    # Truncate to avoid token limits
-                    response = model.generate_content(f"{prompt}\n\nContext:\n{text[:30000]}")
-                else:
-                    return f"Error processing image: {str(inner_e)}"
+            # TEXT FALLBACK FOR PDFS (Most Reliable)
+            if file_path.lower().endswith('.pdf'):
+                text = get_pdf_text(file_path)
+                if not text: return "Error: Could not extract text from PDF."
+                # Gemini 2.0 has huge context, so we can send more text
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=f"{prompt}\n\nContext:\n{text[:100000]}"
+                )
+            # IMAGE HANDLING
+            elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                 with open(file_path, "rb") as f:
+                    image_bytes = f.read()
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                            prompt
+                        ]
+                    )
+            else:
+                return "Error: Unsupported file format for AI."
         else:
-            # Simple text generation
-            print("DEBUG: Generating content (text only)...")
-            response = model.generate_content(prompt)
+            # TEXT ONLY
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
         
         return response.text
 
     except Exception as e:
-        # ⚠️ THIS WILL SHOW US THE REAL ERROR
-        return f"🚨 CRITICAL ERROR: {str(e)}"
+        return f"⚠️ AI Error: {str(e)}"
+
+def extract_json_from_text(text):
+    if not text: return None
+    try:
+        match = re.search(r'(\[.*\]|\{.*\})', text, re.DOTALL)
+        if match: return json.loads(match.group(1))
+    except: pass
+    return None
+
+def extract_dot_from_text(text):
+    if not text: return None
+    try:
+        match = re.search(r'(digraph\s+.*\}|graph\s+.*\})', text, re.DOTALL)
+        if match: return match.group(1)
+        if "digraph" in text: return text
+    except: pass
+    return None
+
 @st.cache_data(show_spinner=False) 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
@@ -539,15 +546,19 @@ def generate_ai_content(file_path, task_type, force_vision=False):
         'mindmap': 'Create a hierarchical mind map. Return ONLY valid Graphviz DOT syntax starting with "digraph G {". Use simple labels.'
     }
     
+    # Logic to choose Vision vs Text
     extracted_text = get_pdf_text(file_path)
     use_vision = force_vision or len(extracted_text.strip()) < 50
     
+    # Note: New SDK makes image handling easy, so we reuse get_ai_response logic
     if use_vision:
+        # Pass file path directly to helper, it handles image bytes
         raw_text = get_ai_response(prompts[task_type], file_path=file_path)
     else:
-        raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:12000]}")
+        # Send text context
+        raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:100000]}")
     
-    if raw_text and (raw_text.startswith("AI Failed") or raw_text.startswith("⚠️ System Busy")): return raw_text 
+    if raw_text and raw_text.startswith("⚠️ AI Error"): return raw_text 
 
     if task_type == 'summary': return raw_text
     if task_type == 'mindmap': return extract_dot_from_text(raw_text)
@@ -1101,7 +1112,7 @@ else:
                         with st.spinner("Summarizing..."):
                             st.session_state.ai_outputs['summary'] = generate_ai_content(file_path, "summary", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error")):
                     st.error(data)
                     if st.button("Regenerate Summary"): del st.session_state.ai_outputs['summary']; st.rerun()
                 else:
@@ -1115,7 +1126,7 @@ else:
                         with st.spinner("Mapping concepts..."):
                             st.session_state.ai_outputs['mindmap'] = generate_ai_content(file_path, "mindmap", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error")):
                      st.error(data)
                      if st.button("Regenerate Mind Map"): del st.session_state.ai_outputs['mindmap']; st.rerun()
                 else:
@@ -1133,7 +1144,7 @@ else:
                         with st.spinner("Creating cards..."):
                             st.session_state.ai_outputs['flashcard'] = generate_ai_content(file_path, "flashcard", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error")):
                      st.error(data)
                      if st.button("Regenerate Flashcards"): del st.session_state.ai_outputs['flashcard']; st.rerun()
                 elif isinstance(data, list):
@@ -1156,7 +1167,7 @@ else:
                         with st.spinner("Creating quiz..."):
                             st.session_state.ai_outputs['mcq'] = generate_ai_content(file_path, "mcq", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error")):
                      st.error(data)
                      if st.button("Regenerate MCQs"): del st.session_state.ai_outputs['mcq']; st.rerun()
                 elif isinstance(data, list):
@@ -1177,7 +1188,7 @@ else:
                         with st.spinner("Creating questions..."):
                             st.session_state.ai_outputs['subjective'] = generate_ai_content(file_path, "subjective", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error")):
                      st.error(data)
                      if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 elif isinstance(data, list):
