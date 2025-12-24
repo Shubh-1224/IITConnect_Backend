@@ -1,14 +1,6 @@
 streamlit
-os
-sqlite3
-hashlib
-json
-re
-pandas
-base64
-collections
-datetime
+google-generativeai
 pypdf
 streamlit-pdf-viewer
-google-generativeai
+pandas
 graphviz
