@@ -404,15 +404,37 @@ def handle_vote(item_id, item_type, voter, direction):
     conn.close()
 
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
-    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
+    # 1. Open connection for the NOTE
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    try:
+        # Insert the note
+        c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", 
+                  (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
+        
+        # Update user stats
+        if uploader != "Anonymous":
+            c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
+        
+        # 2. COMMIT AND CLOSE IMMEDIATELY
+        # This releases the database lock so other functions can use it
+        conn.commit()
+    except Exception as e:
+        st.error(f"Database error: {e}")
+    finally:
+        conn.close()
+
+    # 3. Handle Notifications & Reputation (New Connections)
+    # These functions open their own connections, so they must run AFTER the main conn is closed
     if uploader != "Anonymous":
-        c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
+        # get_followers_list opens a read connection
         followers = get_followers_list(uploader)
         for f in followers:
+            # add_notification opens a write connection (would fail if note conn was open)
             add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
-    conn.commit(); conn.close(); 
-    if uploader != "Anonymous": update_reputation(uploader)
+        
+        update_reputation(uploader)
 
 def add_answer(doubt_id, user, text, original_uploader):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
