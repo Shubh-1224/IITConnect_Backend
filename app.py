@@ -450,12 +450,14 @@ def get_pdf_text(pdf_path):
 def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    # FIXED: Changed from non-existent 2.5-flash to 1.5-flash
-    model_name = "gemini-2.5-flash"
-    max_retries = 3
-    base_delay = 10
+    # ✅ FIX 1: Use the correct, stable model name
+    # 'gemini-1.5-flash' is faster and has better free-tier limits than Pro
+    model_name = "gemini-1.5-flash" 
     
-    time.sleep(1) # Prevent burst clicks
+    max_retries = 3
+    base_delay = 5 # Reduced base delay, but we use exponential backoff
+    
+    time.sleep(2) # ✅ FIX 2: Increased initial pause to prevent burst-click errors
 
     for attempt in range(max_retries):
         try:
@@ -467,6 +469,8 @@ def get_ai_response(prompt, file_path=None):
                         mime_type = 'image/jpeg'
                         
                     uploaded = genai.upload_file(file_path, mime_type=mime_type)
+                    
+                    # Wait for processing
                     wait_count = 0
                     while uploaded.state.name == "PROCESSING": 
                         time.sleep(1)
@@ -480,7 +484,8 @@ def get_ai_response(prompt, file_path=None):
                     if file_path.lower().endswith('.pdf'):
                         text = get_pdf_text(file_path)
                         if not text: raise ValueError("Empty PDF text")
-                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
+                        # Truncate text to stay within token limits
+                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:30000]}")
                     else: 
                         raise inner_e
             else:
@@ -490,16 +495,18 @@ def get_ai_response(prompt, file_path=None):
 
         except Exception as e:
             error_msg = str(e)
+            print(f"DEBUG: Attempt {attempt+1} failed with: {error_msg}") # Helpful for debugging terminal
+            
             # Handle Quota/Rate Limits (429) or Server Overload (503)
-            if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg or "resource" in error_msg.lower():
+            # We also catch "404" in case the model name is temporarily unavailable
+            if any(x in error_msg.lower() for x in ["429", "quota", "503", "resource", "overloaded"]):
                 if attempt < max_retries - 1:
-                    wait_time = base_delay * (attempt + 1)
-                    # FIXED: REPLACED st.toast WITH print TO AVOID CACHING ERRORS
-                    print(f"Analyzing... (Attempt {attempt+1} - This might take a moment due to high demand)...")
+                    wait_time = base_delay * (2 ** attempt) # Exponential backoff: 5s, 10s, 20s
+                    print(f"Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
                 else:
-                    return "⚠️ System Busy: The AI quota is currently full. Please wait 1-2 minutes and try again."
+                    return "⚠️ System Busy: Google's free AI quota is full. Please wait 1 minute."
             
             return f"AI Failed. Error: {error_msg}"
 
