@@ -518,6 +518,7 @@ def extract_dot_from_text(text):
         if "digraph" in text: return text
     except: pass
     return None
+@st.cache_data(show_spinner=False) 
 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
