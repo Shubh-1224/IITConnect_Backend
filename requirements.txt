@@ -9,6 +9,6 @@ base64
 collections
 datetime
 pypdf
-streamlit pdf viewer
-google.generativeai
+streamlit-pdf-viewer
+google-generativeai
 graphviz
