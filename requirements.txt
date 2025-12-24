@@ -1,0 +1,14 @@
+streamlit
+os
+sqlite3
+hashlib
+json
+re
+pandas
+base64
+collections
+datetime
+pypdf
+streamlit pdf viewer
+google.generativeai
+graphviz
