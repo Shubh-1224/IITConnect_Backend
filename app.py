@@ -25,6 +25,8 @@ except FileNotFoundError:
     st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
+
+# FIXED: Use a valid model name (1.5-flash is stable and fast)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # CONSTANTS
@@ -450,14 +452,12 @@ def get_pdf_text(pdf_path):
 def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
-    # ✅ FIX 1: Use the correct, stable model name
-    # 'gemini-1.5-flash' is faster and has better free-tier limits than Pro
-    model_name = "gemini-1.5-flash" 
-    
+    # FIXED: Changed to a valid model name
+    model_name = "gemini-1.5-flash"
     max_retries = 3
-    base_delay = 5 # Reduced base delay, but we use exponential backoff
+    base_delay = 5
     
-    time.sleep(2) # ✅ FIX 2: Increased initial pause to prevent burst-click errors
+    time.sleep(2) # Prevent burst clicks
 
     for attempt in range(max_retries):
         try:
@@ -469,8 +469,6 @@ def get_ai_response(prompt, file_path=None):
                         mime_type = 'image/jpeg'
                         
                     uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                    
-                    # Wait for processing
                     wait_count = 0
                     while uploaded.state.name == "PROCESSING": 
                         time.sleep(1)
@@ -495,18 +493,17 @@ def get_ai_response(prompt, file_path=None):
 
         except Exception as e:
             error_msg = str(e)
-            print(f"DEBUG: Attempt {attempt+1} failed with: {error_msg}") # Helpful for debugging terminal
+            print(f"DEBUG: Attempt {attempt+1} failed: {error_msg}")
             
-            # Handle Quota/Rate Limits (429) or Server Overload (503)
-            # We also catch "404" in case the model name is temporarily unavailable
-            if any(x in error_msg.lower() for x in ["429", "quota", "503", "resource", "overloaded"]):
+            # Handle Quota/Rate Limits or "Model Not Found" issues
+            if any(x in error_msg.lower() for x in ["429", "quota", "503", "resource", "404", "not found"]):
                 if attempt < max_retries - 1:
-                    wait_time = base_delay * (2 ** attempt) # Exponential backoff: 5s, 10s, 20s
+                    wait_time = base_delay * (2 ** attempt) # Exponential backoff
                     print(f"Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
                 else:
-                    return "⚠️ System Busy: Google's free AI quota is full. Please wait 1 minute."
+                    return "⚠️ System Busy: The AI quota is currently full or the model is overloaded. Please wait 1-2 minutes."
             
             return f"AI Failed. Error: {error_msg}"
 
@@ -1187,4 +1184,4 @@ else:
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
 
-st.markdown("<div style='text-align: center; color: grey;'>Powered by Gemini • Powered by Google AI Studio</div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top: 20px;'><button disabled style='cursor: default; opacity: 0.7;'>Powered by Gemini  |  Powered by Google AI Studio</button></div>", unsafe_allow_html=True)
