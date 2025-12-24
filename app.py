@@ -476,6 +476,7 @@ def get_pdf_text(pdf_path):
     return text
 
 # --- 6. AI LOGIC (UPDATED FOR NEW SDK + GEMINI 2.0) ---
+# --- 6. AI LOGIC (ROBUST RETRY + NEW SDK) ---
 def get_ai_response(prompt, file_path=None):
     if not GOOGLE_API_KEY:
         return "Error: API Key missing. Please config."
@@ -483,41 +484,58 @@ def get_ai_response(prompt, file_path=None):
     # 🌟 USE THE NEW, FAST MODEL
     model_name = "gemini-2.0-flash" 
     
-    try:
-        if file_path:
-            # TEXT FALLBACK FOR PDFS (Most Reliable)
-            if file_path.lower().endswith('.pdf'):
-                text = get_pdf_text(file_path)
-                if not text: return "Error: Could not extract text from PDF."
-                # Gemini 2.0 has huge context, so we can send more text
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=f"{prompt}\n\nContext:\n{text[:100000]}"
-                )
-            # IMAGE HANDLING
-            elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                 with open(file_path, "rb") as f:
-                    image_bytes = f.read()
+    max_retries = 3
+    base_delay = 5 # Start waiting 5 seconds
+
+    for attempt in range(max_retries):
+        try:
+            if file_path:
+                # TEXT FALLBACK FOR PDFS (Most Reliable)
+                if file_path.lower().endswith('.pdf'):
+                    text = get_pdf_text(file_path)
+                    if not text: return "Error: Could not extract text from PDF."
+                    # Gemini 2.0 has huge context
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=[
-                            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                            prompt
-                        ]
+                        contents=f"{prompt}\n\nContext:\n{text[:100000]}"
                     )
+                # IMAGE HANDLING
+                elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                     with open(file_path, "rb") as f:
+                        image_bytes = f.read()
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[
+                                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                                prompt
+                            ]
+                        )
+                else:
+                    return "Error: Unsupported file format for AI."
             else:
-                return "Error: Unsupported file format for AI."
-        else:
-            # TEXT ONLY
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-        
-        return response.text
+                # TEXT ONLY
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+            
+            return response.text
 
-    except Exception as e:
-        return f"⚠️ AI Error: {str(e)}"
+        except Exception as e:
+            error_msg = str(e)
+            
+            # CHECK FOR QUOTA ERRORS (429) OR OVERLOAD (503)
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = base_delay * (2 ** attempt) # Wait 5s, then 10s, then 20s
+                    print(f"⚠️ Quota hit. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return "⚠️ System Busy: The AI is currently overloaded. Please wait 1 minute and try again."
+            
+            # If it's a real error (not quota), fail immediately
+            return f"⚠️ AI Error: {error_msg}"
 
 def extract_json_from_text(text):
     if not text: return None
