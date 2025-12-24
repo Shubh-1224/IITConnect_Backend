@@ -1177,14 +1177,4 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
-# Create 3 columns: small, small, and huge (the huge one pushes the others together)
-col1, col2, col3 = st.columns([1, 1, 8]) 
-
-with col1:
-    st.button("Powered by Gemini", disabled=True, key="btn_gemini")
-
-with col2:
-    st.button("Powered by Google AI Studio", disabled=True, key="btn_studio")
-
-with col3:
-    pass # This empty column takes up the rest of the space
+st.markdown("<div style='text-align: center; color: grey;'>Powered by Gemini • Powered by Google AI Studio</div>", unsafe_allow_html=True)
