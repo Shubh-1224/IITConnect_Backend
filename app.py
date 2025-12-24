@@ -451,7 +451,7 @@ def get_ai_response(prompt, file_path=None):
     if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
     
     # FIXED: Changed from non-existent 2.5-flash to 1.5-flash
-    model_name = "gemini-2.5-flash-lite"
+    model_name = "gemini-2.5-flash"
     max_retries = 3
     base_delay = 10
     
