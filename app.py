@@ -494,7 +494,7 @@ def get_ai_response(prompt, file_path=None):
             if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg or "resource" in error_msg.lower():
                 if attempt < max_retries - 1:
                     wait_time = base_delay * (attempt + 1)
-                    st.toast(f"⏳ High Traffic: Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                    st.toast(" Analyzing... (This might take a moment due to high demand)...")
                     time.sleep(wait_time)
                     continue
                 else:
