@@ -4,3 +4,4 @@ pypdf
 streamlit-pdf-viewer
 pandas
 graphviz
+google-genai
