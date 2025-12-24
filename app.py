@@ -482,7 +482,7 @@ def get_ai_response(prompt, file_path=None):
     if not GOOGLE_API_KEY:
         return "Error: API Key missing. Please config."
     
-    model_name = "gemini-2.0-flash" 
+    model_name = "gemini-2.5-flash" 
     
     # INCREASED LIMITS
     max_retries = 3
