@@ -1180,7 +1180,7 @@ else:
 st.write("---") # Optional: Adds a horizontal line separator
 
 # Create 2 columns for side-by-side layout
-col1, col2 = st.columns([1, 1]) # You can adjust width ratios if needed
+col1, col2 = st.columns([0,1]) # You can adjust width ratios if needed
 
 with col1:
     st.button("Powered by Gemini", disabled=True, key="btn_gemini")
