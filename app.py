@@ -740,7 +740,10 @@ def landing_page():
             c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "IIT Hyderabad", "IIT BHU", "IIT Indore", "IIT Gandhinagar", "IIT Mandi", "IIT Ropar", "Other"])
             if st.button("✨ Create Account", use_container_width=True):
                 if c and u and p:
-                    if register_user(u, p, c): st.success("Account created! Go to Login.");
+                    if register_user(u, p, c):
+                        st.success("Account created! Go to Login.")
+                        time.sleep(1)
+                        st.rerun()
                     else: st.error("Username already taken.")
                 else: st.error("All fields are required.")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1178,4 +1181,3 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
-                
