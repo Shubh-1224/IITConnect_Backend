@@ -494,7 +494,8 @@ def get_ai_response(prompt, file_path=None):
             if "429" in error_msg or "quota" in error_msg.lower() or "503" in error_msg or "resource" in error_msg.lower():
                 if attempt < max_retries - 1:
                     wait_time = base_delay * (attempt + 1)
-                    st.toast(" Analyzing... (This might take a moment due to high demand)...")
+                    # FIXED: REPLACED st.toast WITH print TO AVOID CACHING ERRORS
+                    print(f"Analyzing... (Attempt {attempt+1} - This might take a moment due to high demand)...")
                     time.sleep(wait_time)
                     continue
                 else:
@@ -518,8 +519,8 @@ def extract_dot_from_text(text):
         if "digraph" in text: return text
     except: pass
     return None
-@st.cache_data(show_spinner=False) 
 
+@st.cache_data(show_spinner=False) 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
         'mcq': 'Create 5 MCQs based on the content. Return ONLY a JSON array: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
@@ -1178,4 +1179,5 @@ else:
                         st.divider()
                     if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 else: st.error(data)
+
 st.markdown("<div style='text-align: center; color: grey;'>Powered by Gemini • Powered by Google AI Studio</div>", unsafe_allow_html=True)
