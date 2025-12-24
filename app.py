@@ -502,11 +502,12 @@ def get_ai_response(prompt, file_path=None):
                     print(f"Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
+                # REPLACE WITH THIS:
                 else:
-                    return "⚠️ System Busy: The AI quota is currently full or the model is overloaded. Please wait 1-2 minutes."
+                    # RETURN THE REAL ERROR SO WE CAN SEE IT
+                    return f"⚠️ ERROR DETAILS: {error_msg}" 
             
             return f"AI Failed. Error: {error_msg}"
-
 def extract_json_from_text(text):
     if not text: return None
     try:
