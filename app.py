@@ -477,29 +477,27 @@ def get_pdf_text(pdf_path):
 
 # --- 6. AI LOGIC (UPDATED FOR NEW SDK + GEMINI 2.0) ---
 # --- 6. AI LOGIC (ROBUST RETRY + NEW SDK) ---
+# --- 6. AI LOGIC (SMART RETRY + VISUAL COUNTDOWN) ---
 def get_ai_response(prompt, file_path=None):
     if not GOOGLE_API_KEY:
         return "Error: API Key missing. Please config."
     
-    # 🌟 USE THE NEW, FAST MODEL
     model_name = "gemini-2.0-flash" 
     
+    # INCREASED LIMITS
     max_retries = 3
-    base_delay = 5 # Start waiting 5 seconds
+    base_delay = 20 # Start waiting 20 seconds (since error said ~33s)
 
     for attempt in range(max_retries):
         try:
             if file_path:
-                # TEXT FALLBACK FOR PDFS (Most Reliable)
                 if file_path.lower().endswith('.pdf'):
                     text = get_pdf_text(file_path)
                     if not text: return "Error: Could not extract text from PDF."
-                    # Gemini 2.0 has huge context
                     response = client.models.generate_content(
                         model=model_name,
                         contents=f"{prompt}\n\nContext:\n{text[:100000]}"
                     )
-                # IMAGE HANDLING
                 elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
                      with open(file_path, "rb") as f:
                         image_bytes = f.read()
@@ -513,7 +511,6 @@ def get_ai_response(prompt, file_path=None):
                 else:
                     return "Error: Unsupported file format for AI."
             else:
-                # TEXT ONLY
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt
@@ -524,17 +521,23 @@ def get_ai_response(prompt, file_path=None):
         except Exception as e:
             error_msg = str(e)
             
-            # CHECK FOR QUOTA ERRORS (429) OR OVERLOAD (503)
+            # CHECK FOR QUOTA ERRORS (429)
             if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg:
                 if attempt < max_retries - 1:
-                    wait_time = base_delay * (2 ** attempt) # Wait 5s, then 10s, then 20s
-                    print(f"⚠️ Quota hit. Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
+                    # CALCULATE WAIT TIME (20s -> 40s)
+                    wait_time = base_delay * (2 ** attempt) 
+                    
+                    # VISUAL COUNTDOWN FOR USER
+                    placeholder = st.empty()
+                    for t in range(wait_time, 0, -1):
+                        placeholder.warning(f"⚠️ Quota limit hit. Google asked us to wait. Retrying in {t} seconds...")
+                        time.sleep(1)
+                    placeholder.empty() # Clear message after waiting
+                    
                     continue
                 else:
-                    return "⚠️ System Busy: The AI is currently overloaded. Please wait 1 minute and try again."
+                    return "⚠️ System Busy: The AI quota is exhausted. Please wait 1-2 minutes manually."
             
-            # If it's a real error (not quota), fail immediately
             return f"⚠️ AI Error: {error_msg}"
 
 def extract_json_from_text(text):
