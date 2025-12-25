@@ -1038,7 +1038,7 @@ else:
 
     elif menu == "Post":
         st.title("📝 Contribute")
-        t1, t2 = st.tabs(["Upload Note", "Ask Doubts"])
+        t1, t2 = st.tabs(["Upload Note", "Ask Doubt"])
         with t1:
             with st.form("u"):
                 ti=st.text_input("Title"); sub=st.selectbox("Subject", ["Physics", "Mathematics", "CS", "Electronics"]); tags=st.text_input("Tags (e.g. #Exam #Hard)"); f=st.file_uploader("PDF", type="pdf")
