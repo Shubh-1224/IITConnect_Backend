@@ -1245,4 +1245,4 @@ else:
                 else: st.error(data)
 
 st.markdown("<div style='margin-top: 20px;'><button disabled style='cursor: default; opacity: 0.7;'>Powered by Gemini  |  Powered by Google AI Studio</button></div>", unsafe_allow_html=True)
-# 
+#
