@@ -335,19 +335,36 @@ def submit_report(post_id, reporter, reason, details):
 # --- 5. CRUD ---
 def delete_item(table, item_id):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    if table == "notes":
-        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,)); user = c.fetchone()[0]
-        c.execute("DELETE FROM notes WHERE id=?", (item_id,)); 
-        if user != "Anonymous": c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
-    elif table == "answers":
-        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,)); user = c.fetchone()[0]
-        c.execute("DELETE FROM answers WHERE id=?", (item_id,)); 
-        if user != "Anonymous": c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
-    else: c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
-    conn.commit(); conn.close(); 
-    if user != "Anonymous": update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
-    st.toast(f"🗑️ {table[:-1].title()} Deleted"); st.rerun()
+    user = None # ✅ Initialize to prevent UnboundLocalError
 
+    if table == "notes":
+        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,))
+        res = c.fetchone()
+        if res:
+            user = res[0]
+            c.execute("DELETE FROM notes WHERE id=?", (item_id,))
+            if user != "Anonymous": c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
+    
+    elif table == "answers":
+        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,))
+        res = c.fetchone()
+        if res:
+            user = res[0]
+            c.execute("DELETE FROM answers WHERE id=?", (item_id,))
+            if user != "Anonymous": c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
+    
+    else: 
+        # For comments or other items
+        c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
+        user = st.session_state.user # ✅ Set user to current user for comments
+    
+    conn.commit(); conn.close()
+    
+    # Safe check now that user is guaranteed to be defined
+    if user and user != "Anonymous": 
+        update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
+        
+    st.toast(f"🗑️ {table[:-1].title()} Deleted"); st.rerun()
 def edit_item(table, item_id, new_text, column="content"):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id)); conn.commit(); conn.close(); st.toast("✅ Updated successfully!"); st.rerun()
