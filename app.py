@@ -764,8 +764,8 @@ def landing_page():
         
         # Live Stats Row
         s1, s2, s3 = st.columns(3)
-        with s1: st.metric("Students", f"{u_count}+", "+12 today")
-        with s2: st.metric("Resources", f"{n_count}+", "+5 today")
+        with s1: st.metric("Students", f"{u_count}+", "+2 today")
+        with s2: st.metric("Resources", f"{n_count}+", "+2 today")
         with s3: st.metric("Colleges", "23", "All IITs")
 
         st.markdown("### 🚀 Why Join?")
@@ -802,7 +802,10 @@ def landing_page():
             c = st.selectbox("Select College", ["IIT Bombay", "IIT Delhi", "IIT Madras", "IIT Kanpur", "IIT Kharagpur", "IIT Roorkee", "IIT Guwahati", "IIT Hyderabad", "IIT BHU", "IIT Indore", "IIT Gandhinagar", "IIT Mandi", "IIT Ropar", "Other"])
             if st.button("✨ Create Account", use_container_width=True):
                 if c and u and p:
-                    if register_user(u, p, c): st.success("Account created! Go to Login.");
+                    if register_user(u, p, c):
+                        st.success("Account created! Go to Login.")
+                        time.sleep(1)
+                        st.rerun()
                     else: st.error("Username already taken.")
                 else: st.error("All fields are required.")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1242,3 +1245,4 @@ else:
                 else: st.error(data)
 
 st.markdown("<div style='margin-top: 20px;'><button disabled style='cursor: default; opacity: 0.7;'>Powered by Gemini  |  Powered by Google AI Studio</button></div>", unsafe_allow_html=True)
+# 
