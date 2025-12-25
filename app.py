@@ -333,17 +333,35 @@ def submit_report(post_id, reporter, reason, details):
 # --- 5. CRUD ---
 def delete_item(table, item_id):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    user = None # ✅ Initialize to prevent UnboundLocalError
+
     if table == "notes":
-        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,)); user = c.fetchone()[0]
-        c.execute("DELETE FROM notes WHERE id=?", (item_id,)); 
-        if user != "Anonymous": c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
+        c.execute("SELECT uploader FROM notes WHERE id=?", (item_id,))
+        res = c.fetchone()
+        if res:
+            user = res[0]
+            c.execute("DELETE FROM notes WHERE id=?", (item_id,))
+            if user != "Anonymous": c.execute("UPDATE users SET posts_count = posts_count - 1 WHERE username=?", (user,))
+    
     elif table == "answers":
-        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,)); user = c.fetchone()[0]
-        c.execute("DELETE FROM answers WHERE id=?", (item_id,)); 
-        if user != "Anonymous": c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
-    else: c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
-    conn.commit(); conn.close(); 
-    if user != "Anonymous": update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
+        c.execute("SELECT responder FROM answers WHERE id=?", (item_id,))
+        res = c.fetchone()
+        if res:
+            user = res[0]
+            c.execute("DELETE FROM answers WHERE id=?", (item_id,))
+            if user != "Anonymous": c.execute("UPDATE users SET answers_count = answers_count - 1 WHERE username=?", (user,))
+    
+    else: 
+        # For comments or other items
+        c.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
+        user = st.session_state.user # ✅ Set user to current user for comments
+    
+    conn.commit(); conn.close()
+    
+    # Safe check now that user is guaranteed to be defined
+    if user and user != "Anonymous": 
+        update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
+        
     st.toast(f"🗑️ {table[:-1].title()} Deleted"); st.rerun()
 
 def edit_item(table, item_id, new_text, column="content"):
@@ -402,16 +420,43 @@ def handle_vote(item_id, item_type, voter, direction):
     conn.close()
 
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
-    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
-    c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
-    if uploader != "Anonymous":
-        c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
-        followers = get_followers_list(uploader)
-        for f in followers:
-            add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
-    conn.commit(); conn.close(); 
-    if uploader != "Anonymous": update_reputation(uploader)
+    # 1. Open connection for the NOTE
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    success = False
+    try:
+        # Insert the note
+        c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", 
+                  (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
+        
+        # Update user stats
+        if uploader != "Anonymous":
+            c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
+        
+        # 2. COMMIT AND CLOSE IMMEDIATELY
+        conn.commit()
+        success = True
+    except Exception as e:
+        st.error(f"Database error: {e}")
+    finally:
+        conn.close()
 
+    # 3. SAFETY PAUSE (Critical for Windows)
+    # Give the OS time to release the file lock
+    if success:
+        time.sleep(0.1) 
+
+    # 4. Handle Notifications (New Connections)
+    if success and uploader != "Anonymous":
+        try:
+            followers = get_followers_list(uploader)
+            for f in followers:
+                add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
+            
+            update_reputation(uploader)
+        except Exception as e:
+            print(f"Notification error (non-critical): {e}")
 def add_answer(doubt_id, user, text, original_uploader):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO answers VALUES (NULL, ?, ?, ?, 0, ?)", (doubt_id, user, text, datetime.now()))
