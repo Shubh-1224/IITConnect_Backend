@@ -608,7 +608,11 @@ def render_feed_item(note):
                             with st.expander("📤 Share"):
                                 st.write("Copy Link:"); st.code(f"https://iitconnect.app/post/{note['id']}")
                                 c1, c2 = st.columns(2)
-                                c1.button("Whatsapp"); c2.button("Twitter")
+                                
+                                # ✅ FIX: Added unique keys (wa_ID, tw_ID)
+                                c1.button("Whatsapp", key=f"wa_{note['id']}")
+                                c2.button("Twitter", key=f"tw_{note['id']}")
+                            
                             with st.expander("🚩 Report"):
                                 reason = st.selectbox("Reason", ["Spam", "Harassment", "Hate Speech", "False Info", "Other"], key=f"rr_{note['id']}")
                                 det = st.text_area("Details", key=f"rd_{note['id']}")
