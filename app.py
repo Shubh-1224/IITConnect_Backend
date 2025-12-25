@@ -11,7 +11,9 @@ from collections import Counter
 from datetime import datetime
 from pypdf import PdfReader
 from streamlit_pdf_viewer import pdf_viewer
-import google.generativeai as genai
+# NEW SDK IMPORT
+from google import genai
+from google.genai import types
 import graphviz
 
 # --- 1. SETUP & CONFIGURATION ---
@@ -24,8 +26,8 @@ except FileNotFoundError:
     st.warning("⚠️ Secrets file not found. Please create .streamlit/secrets.toml")
     st.stop()
 
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash-lite')
+# NEW CLIENT SETUP
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # CONSTANTS
 DB_NAME = "iitconnect_v52.db"
@@ -363,7 +365,6 @@ def delete_item(table, item_id):
         update_reputation(user if table in ['notes', 'answers'] else st.session_state.user)
         
     st.toast(f"🗑️ {table[:-1].title()} Deleted"); st.rerun()
-
 def edit_item(table, item_id, new_text, column="content"):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (new_text, item_id)); conn.commit(); conn.close(); st.toast("✅ Updated successfully!"); st.rerun()
@@ -419,44 +420,18 @@ def handle_vote(item_id, item_type, voter, direction):
     conn.commit()
     conn.close()
 
+# --- FIXED ADD_NOTE TO PREVENT DATABASE LOCKS ---
 def add_note(uploader, subject, title, filename, tags, verified, content="", post_type="RESOURCE"):
-    # 1. Open connection for the NOTE
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    success = False
-    try:
-        # Insert the note
-        c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", 
-                  (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
-        
-        # Update user stats
-        if uploader != "Anonymous":
-            c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
-        
-        # 2. COMMIT AND CLOSE IMMEDIATELY
-        conn.commit()
-        success = True
-    except Exception as e:
-        st.error(f"Database error: {e}")
-    finally:
-        conn.close()
+    conn = sqlite3.connect(DB_NAME); c = conn.cursor()
+    c.execute("INSERT INTO notes VALUES (NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", (uploader, subject, title, filename, 1 if verified else 0, tags, datetime.now(), content, post_type))
+    if uploader != "Anonymous":
+        c.execute("UPDATE users SET posts_count = posts_count + 1 WHERE username = ?", (uploader,))
+        followers = get_followers_list(uploader)
+        for f in followers:
+            add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
+    conn.commit(); conn.close(); 
+    if uploader != "Anonymous": update_reputation(uploader)
 
-    # 3. SAFETY PAUSE (Critical for Windows)
-    # Give the OS time to release the file lock
-    if success:
-        time.sleep(0.1) 
-
-    # 4. Handle Notifications (New Connections)
-    if success and uploader != "Anonymous":
-        try:
-            followers = get_followers_list(uploader)
-            for f in followers:
-                add_notification(f, f"{uploader} posted a new {post_type.lower()}: {title}")
-            
-            update_reputation(uploader)
-        except Exception as e:
-            print(f"Notification error (non-critical): {e}")
 def add_answer(doubt_id, user, text, original_uploader):
     conn = sqlite3.connect(DB_NAME); c = conn.cursor()
     c.execute("INSERT INTO answers VALUES (NULL, ?, ?, ?, 0, ?)", (doubt_id, user, text, datetime.now()))
@@ -491,62 +466,70 @@ def get_pdf_text(pdf_path):
     except: pass
     return text
 
-# --- 6. AI LOGIC (ROBUST RETRY + CORRECTED MODEL) ---
+# --- 6. AI LOGIC (SMART RETRY + VISUAL COUNTDOWN) ---
 def get_ai_response(prompt, file_path=None):
-    if GOOGLE_API_KEY == "PASTE_YOUR_API_KEY_HERE": return "Error: API Key missing. Please config."
+    if not GOOGLE_API_KEY:
+        return "Error: API Key missing. Please config."
     
-    # FIXED: Changed from non-existent 2.5-flash to 1.5-flash
-    model_name = "gemini-2.5-flash"
+    model_name = "gemini-2.0-flash" 
+    
+    # INCREASED LIMITS
     max_retries = 3
-    base_delay = 10
-    
-    time.sleep(1) # Prevent burst clicks
+    base_delay = 20 # Start waiting 20 seconds (since error said ~33s)
 
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel(model_name)
             if file_path:
-                try:
-                    mime_type = 'application/pdf'
-                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        mime_type = 'image/jpeg'
-                        
-                    uploaded = genai.upload_file(file_path, mime_type=mime_type)
-                    wait_count = 0
-                    while uploaded.state.name == "PROCESSING": 
-                        time.sleep(1)
-                        uploaded = genai.get_file(uploaded.name)
-                        wait_count += 1
-                        if wait_count > 30: break 
-                    
-                    response = model.generate_content([uploaded, prompt])
-                except Exception as inner_e:
-                    # Fallback text extraction if vision upload/processing fails
-                    if file_path.lower().endswith('.pdf'):
-                        text = get_pdf_text(file_path)
-                        if not text: raise ValueError("Empty PDF text")
-                        response = model.generate_content(f"{prompt}\n\nContext:\n{text[:15000]}")
-                    else: 
-                        raise inner_e
+                if file_path.lower().endswith('.pdf'):
+                    text = get_pdf_text(file_path)
+                    if not text: return "Error: Could not extract text from PDF."
+                    # Gemini 2.0 has huge context
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=f"{prompt}\n\nContext:\n{text[:100000]}"
+                    )
+                elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                     with open(file_path, "rb") as f:
+                        image_bytes = f.read()
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[
+                                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                                prompt
+                            ]
+                        )
+                else:
+                    return "Error: Unsupported file format for AI."
             else:
-                response = model.generate_content(prompt)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
             
             return response.text
 
         except Exception as e:
             error_msg = str(e)
-            print(f"Attempt {attempt+1} failed: {error_msg}")
-            # Handle Quota/Rate Limits (429) or Server Overload (503)
-            if "429" in error_msg or "quota" in error_msg.lower() or "resource" in error_msg.lower():
+            
+            # CHECK FOR QUOTA ERRORS (429) OR OVERLOAD (503)
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg:
                 if attempt < max_retries - 1:
-                    wait_time = base_delay * (2**attempt)
-                    st.toast(f"⏳ High Traffic: Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
+                    # CALCULATE WAIT TIME (20s -> 40s)
+                    wait_time = base_delay * (2 ** attempt) 
+                    
+                    # VISUAL COUNTDOWN FOR USER
+                    placeholder = st.empty()
+                    for t in range(wait_time, 0, -1):
+                        placeholder.warning(f"⚠️ Quota limit hit. Google asked us to wait. Retrying in {t} seconds...")
+                        time.sleep(1)
+                    placeholder.empty() # Clear message after waiting
+                    
                     continue
                 else:
-                    return "⚠️ System Busy: API Quota exceeded. Please wait 1 minute."
+                    return "⚠️ System Busy: The AI quota is exhausted. Please wait 1-2 minutes manually."
             
-            return f"AI Failed. Error: {error_msg}"
+            # If it's a real error (not quota), fail immediately
+            return f"⚠️ AI Error: {error_msg}"
 
 def extract_json_from_text(text):
     if not text: return None
@@ -565,6 +548,7 @@ def extract_dot_from_text(text):
     except: pass
     return None
 
+@st.cache_data(show_spinner=False) 
 def generate_ai_content(file_path, task_type, force_vision=False):
     prompts = {
         'mcq': 'Create 5 MCQs based on the content. Return ONLY a JSON array: [{"question":"...","options":["A","B","C","D"],"answer":"Exact Text","hint":"..."}]',
@@ -574,15 +558,20 @@ def generate_ai_content(file_path, task_type, force_vision=False):
         'mindmap': 'Create a hierarchical mind map. Return ONLY valid Graphviz DOT syntax starting with "digraph G {". Use simple labels.'
     }
     
+    # Logic to choose Vision vs Text
     extracted_text = get_pdf_text(file_path)
     use_vision = force_vision or len(extracted_text.strip()) < 50
     
+    # Note: New SDK makes image handling easy, so we reuse get_ai_response logic
     if use_vision:
+        # Pass file path directly to helper, it handles image bytes
         raw_text = get_ai_response(prompts[task_type], file_path=file_path)
     else:
-        raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:12000]}")
+        # Send text context
+        raw_text = get_ai_response(f"{prompts[task_type]}\n\nContent:\n{extracted_text[:100000]}")
     
-    if raw_text and (raw_text.startswith("AI Failed") or raw_text.startswith("⚠️ System Busy")): return raw_text 
+    if raw_text and raw_text.startswith("⚠️ AI Error"): return raw_text 
+    if raw_text and raw_text.startswith("⚠️ System Busy"): return raw_text
 
     if task_type == 'summary': return raw_text
     if task_type == 'mindmap': return extract_dot_from_text(raw_text)
@@ -653,7 +642,9 @@ def render_feed_item(note):
                             with st.expander("📤 Share"):
                                 st.write("Copy Link:"); st.code(f"https://iitconnect.app/post/{note['id']}")
                                 c1, c2 = st.columns(2)
-                                c1.button("Whatsapp"); c2.button("Twitter")
+                                # ✅ FIXED UNIQUE KEYS FOR BUTTONS
+                                c1.button("Whatsapp", key=f"wa_{note['id']}")
+                                c2.button("Twitter", key=f"tw_{note['id']}")
                             with st.expander("🚩 Report"):
                                 reason = st.selectbox("Reason", ["Spam", "Harassment", "Hate Speech", "False Info", "Other"], key=f"rr_{note['id']}")
                                 det = st.text_area("Details", key=f"rd_{note['id']}")
@@ -747,8 +738,8 @@ def landing_page():
         
         # Live Stats Row
         s1, s2, s3 = st.columns(3)
-        with s1: st.metric("Students", f"{u_count}+", "+12 today")
-        with s2: st.metric("Resources", f"{n_count}+", "+5 today")
+        with s1: st.metric("Students", f"{u_count}+", "+2 today")
+        with s2: st.metric("Resources", f"{n_count}+", "+2 today")
         with s3: st.metric("Colleges", "23", "All IITs")
 
         st.markdown("### 🚀 Why Join?")
@@ -1078,7 +1069,7 @@ else:
                             with st.spinner("🤖 AI is thinking..."):
                                 prompt = f"Answer this academic doubt clearly: {ti}\nDetails: {txt}"
                                 ai_reply = get_ai_response(prompt, file_path=fpath)
-                                if ai_reply and not ai_reply.startswith("Error"):
+                                if ai_reply and not ai_reply.startswith("Error") and not ai_reply.startswith("⚠️"):
                                     add_answer(new_id_data[0], "🤖 AI Tutor", ai_reply, uploader_name)
                         
                         st.success("Posted & Answered by AI!")
@@ -1136,7 +1127,7 @@ else:
                         with st.spinner("Summarizing..."):
                             st.session_state.ai_outputs['summary'] = generate_ai_content(file_path, "summary", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error") or data.startswith("⚠️ System Busy")):
                     st.error(data)
                     if st.button("Regenerate Summary"): del st.session_state.ai_outputs['summary']; st.rerun()
                 else:
@@ -1150,7 +1141,7 @@ else:
                         with st.spinner("Mapping concepts..."):
                             st.session_state.ai_outputs['mindmap'] = generate_ai_content(file_path, "mindmap", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error") or data.startswith("⚠️ System Busy")):
                      st.error(data)
                      if st.button("Regenerate Mind Map"): del st.session_state.ai_outputs['mindmap']; st.rerun()
                 else:
@@ -1168,7 +1159,7 @@ else:
                         with st.spinner("Creating cards..."):
                             st.session_state.ai_outputs['flashcard'] = generate_ai_content(file_path, "flashcard", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error") or data.startswith("⚠️ System Busy")):
                      st.error(data)
                      if st.button("Regenerate Flashcards"): del st.session_state.ai_outputs['flashcard']; st.rerun()
                 elif isinstance(data, list):
@@ -1191,7 +1182,7 @@ else:
                         with st.spinner("Creating quiz..."):
                             st.session_state.ai_outputs['mcq'] = generate_ai_content(file_path, "mcq", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error") or data.startswith("⚠️ System Busy")):
                      st.error(data)
                      if st.button("Regenerate MCQs"): del st.session_state.ai_outputs['mcq']; st.rerun()
                 elif isinstance(data, list):
@@ -1212,7 +1203,7 @@ else:
                         with st.spinner("Creating questions..."):
                             st.session_state.ai_outputs['subjective'] = generate_ai_content(file_path, "subjective", force_vision)
                             st.rerun()
-                elif isinstance(data, str) and (data.startswith("AI Failed") or data.startswith("⚠️ System Busy")):
+                elif isinstance(data, str) and (data.startswith("⚠️ AI Error") or data.startswith("Error") or data.startswith("⚠️ System Busy")):
                      st.error(data)
                      if st.button("Regenerate Subjective"): del st.session_state.ai_outputs['subjective']; st.rerun()
                 elif isinstance(data, list):
